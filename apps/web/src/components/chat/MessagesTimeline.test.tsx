@@ -1559,11 +1559,12 @@ describe("MessagesTimeline", () => {
     expect(markup).not.toContain('aria-label="Hidden work includes a failure"');
   });
 
-  it("renders live subagent progress on the persistent linked card", async () => {
+  it("renders a live subagent as an entry that opens the Agents panel", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(
       <MessagesTimeline
         {...buildProps()}
+        onOpenAgents={() => {}}
         timelineEntries={[
           {
             id: "subagent-progress",
@@ -1605,9 +1606,13 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    expect(markup).toContain('data-v2-item-type="subagent"');
-    expect(markup).toContain('aria-label="Open Package audit"');
-    expect(markup).toContain("Reading src/index.ts");
+    expect(markup).toContain('data-agent-spawn-cta="true"');
+    expect(markup).toContain('aria-label="Open Agents panel"');
+    expect(markup).toContain("Kicked off 1 agent");
+    expect(markup).toContain("1 working");
+    expect(markup).toContain("Open Agents");
+    expect(markup).not.toContain("Package audit");
+    expect(markup).not.toContain("Reading src/index.ts");
     expect(markup).not.toContain("Inspect the package");
     expect(markup).not.toContain('data-v2-subagent-result-disclosure="true"');
     expect(markup).not.toContain("Work Log");

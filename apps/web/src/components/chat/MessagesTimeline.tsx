@@ -19,6 +19,7 @@ import {
 } from "@t3tools/client-runtime/work-log/presentation";
 const NOOP_USE_ARTIFACT_TEMPLATE = () => {};
 const NOOP_OPEN_ATTACHMENT = (_attachment: ChatFileAttachment) => {};
+const NOOP_OPEN_AGENTS = () => {};
 
 import { resolveChatListAnchoredEndSpace } from "@t3tools/shared/chatList";
 import {
@@ -95,6 +96,7 @@ import { ChangedFilesCard } from "./ChangedFilesTree";
 import { shouldAutoExpandChangedFiles } from "./changedFilesPresentation";
 import { MessageCopyButton } from "./MessageCopyButton";
 import {
+  collapseSubagentTimelineEntries,
   computeStableMessagesTimelineRows,
   deriveMessagesTimelineRows,
   normalizeCompactToolLabel,
@@ -110,6 +112,7 @@ import {
   shouldPreserveAssistantLineBreaks,
   workEntryIsVisibleInGroup,
   type StableMessagesTimelineRowsState,
+  type AgentSpawnCtaGroup,
   type MessagesTimelineRow,
   TIMELINE_MINIMAP_MIN_ITEMS,
   type TimelineLatestRun,
@@ -198,8 +201,14 @@ interface TimelineRowActivityState {
   latestRunId: RunId | null;
 }
 
+interface TimelineAgentSpawnState {
+  readonly ctaByItemId: ReadonlyMap<string, AgentSpawnCtaGroup>;
+  readonly onOpenAgents: () => void;
+}
+
 const TimelineRowCtx = createContext<TimelineRowSharedState>(null!);
 const TimelineRowActivityCtx = createContext<TimelineRowActivityState>(null!);
+const TimelineAgentSpawnCtx = createContext<TimelineAgentSpawnState>(null!);
 const TIMELINE_LIST_HEADER = <div className="h-3 sm:h-4" />;
 const TIMELINE_LIST_FADE_HEADER = (
   <div className="h-[var(--workspace-titlebar-scroll-fade-height)]" />
@@ -216,6 +225,7 @@ const TIMELINE_MAINTAIN_SCROLL_AT_END = {
 } as const;
 const EMPTY_TIMELINE_PROVIDERS: ReadonlyArray<ServerProvider> = [];
 const EMPTY_TIMELINE_RUNS: ReadonlyArray<HandoffTimelineRun> = [];
+const EMPTY_AGENT_SPAWN_CTAS: ReadonlyMap<string, AgentSpawnCtaGroup> = new Map();
 
 // ---------------------------------------------------------------------------
 // Props (public API)
@@ -238,6 +248,7 @@ interface MessagesTimelineProps {
   routeThreadKey: string;
   onOpenTurnDiff: (runId: RunId, filePath?: string) => void;
   onOpenThread: (threadId: OrchestrationV2TurnItem["threadId"]) => void;
+  onOpenAgents?: () => void;
   parentThreadLink?: {
     readonly threadId: ThreadId;
     readonly title: string;
@@ -297,6 +308,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   routeThreadKey,
   onOpenTurnDiff,
   onOpenThread,
+  onOpenAgents,
   parentThreadLink = null,
   onForkFromRun,
   onRollbackCheckpoint,
@@ -451,10 +463,17 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     });
   }, [latestRun]);
 
+  const agentSpawnTimeline = useMemo(
+    () =>
+      onOpenAgents === undefined
+        ? { timelineEntries, ctaByItemId: EMPTY_AGENT_SPAWN_CTAS }
+        : collapseSubagentTimelineEntries(timelineEntries),
+    [onOpenAgents, timelineEntries],
+  );
   const rawRows = useMemo(
     () =>
       deriveMessagesTimelineRows({
-        timelineEntries,
+        timelineEntries: agentSpawnTimeline.timelineEntries,
         latestRun,
         expandedRunIds,
         expandedAttemptIds,
@@ -464,7 +483,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         revertTurnCountByUserMessageId,
       }),
     [
-      timelineEntries,
+      agentSpawnTimeline.timelineEntries,
       latestRun,
       expandedRunIds,
       expandedAttemptIds,
@@ -640,6 +659,13 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     }),
     [activeTurnInProgress, isRevertingCheckpoint, isWorking, latestRun?.runId],
   );
+  const agentSpawnState = useMemo<TimelineAgentSpawnState>(
+    () => ({
+      ctaByItemId: agentSpawnTimeline.ctaByItemId,
+      onOpenAgents: onOpenAgents ?? NOOP_OPEN_AGENTS,
+    }),
+    [agentSpawnTimeline.ctaByItemId, onOpenAgents],
+  );
   const listHeader = useMemo(() => {
     const leadingContent =
       parentThreadLink === null ? (
@@ -704,50 +730,52 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   return (
     <TimelineRowCtx value={sharedState}>
       <TimelineRowActivityCtx value={activityState}>
-        <div ref={setTimelineViewportElement} className="relative h-full min-h-0">
-          <LegendList<MessagesTimelineRow>
-            ref={listRef}
-            data={rows}
-            keyExtractor={keyExtractor}
-            getItemType={getItemType}
-            renderItem={renderItem}
-            estimatedItemSize={90}
-            initialScrollAtEnd
-            {...(anchoredEndSpace ? { anchoredEndSpace } : {})}
-            contentInsetEndAdjustment={contentInsetEndAdjustment}
-            // LegendList owns ordinary end-follow (#5449): the app only turns
-            // it off while the user reads history (liveFollowEnabled), while a
-            // sent turn anchors near the top (anchoredEndSpace), or for the
-            // two-frame settle window of a fold toggle.
-            maintainScrollAtEnd={
-              anchoredEndSpace || !liveFollowEnabled || disclosureToggleSettling
-                ? false
-                : TIMELINE_MAINTAIN_SCROLL_AT_END
-            }
-            maintainVisibleContentPosition={maintainVisibleContentPosition}
-            onScroll={handleScroll}
-            className={cn(
-              "messages-timeline-scroll scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain px-3 [overflow-anchor:none] sm:px-5",
-              topFadeEnabled && "topbar-scroll-fade",
-            )}
-            ListHeaderComponent={listHeader}
-            ListFooterComponent={TIMELINE_LIST_FOOTER}
-          />
-          <TimelineMinimap
-            items={minimapItems}
-            hasPersistentGutter={minimapHasPersistentGutter}
-            hitStripWidth={minimapHitStripWidth}
-            stripMap={minimapStripMap}
-            onSelect={(item) => {
-              onManualNavigation();
-              void listRef.current?.scrollToIndex({
-                index: item.rowIndex,
-                animated: true,
-                viewOffset: 24,
-              });
-            }}
-          />
-        </div>
+        <TimelineAgentSpawnCtx value={agentSpawnState}>
+          <div ref={setTimelineViewportElement} className="relative h-full min-h-0">
+            <LegendList<MessagesTimelineRow>
+              ref={listRef}
+              data={rows}
+              keyExtractor={keyExtractor}
+              getItemType={getItemType}
+              renderItem={renderItem}
+              estimatedItemSize={90}
+              initialScrollAtEnd
+              {...(anchoredEndSpace ? { anchoredEndSpace } : {})}
+              contentInsetEndAdjustment={contentInsetEndAdjustment}
+              // LegendList owns ordinary end-follow (#5449): the app only turns
+              // it off while the user reads history (liveFollowEnabled), while a
+              // sent turn anchors near the top (anchoredEndSpace), or for the
+              // two-frame settle window of a fold toggle.
+              maintainScrollAtEnd={
+                anchoredEndSpace || !liveFollowEnabled || disclosureToggleSettling
+                  ? false
+                  : TIMELINE_MAINTAIN_SCROLL_AT_END
+              }
+              maintainVisibleContentPosition={maintainVisibleContentPosition}
+              onScroll={handleScroll}
+              className={cn(
+                "messages-timeline-scroll scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain px-3 [overflow-anchor:none] sm:px-5",
+                topFadeEnabled && "topbar-scroll-fade",
+              )}
+              ListHeaderComponent={listHeader}
+              ListFooterComponent={TIMELINE_LIST_FOOTER}
+            />
+            <TimelineMinimap
+              items={minimapItems}
+              hasPersistentGutter={minimapHasPersistentGutter}
+              hitStripWidth={minimapHitStripWidth}
+              stripMap={minimapStripMap}
+              onSelect={(item) => {
+                onManualNavigation();
+                void listRef.current?.scrollToIndex({
+                  index: item.rowIndex,
+                  animated: true,
+                  viewOffset: 24,
+                });
+              }}
+            />
+          </div>
+        </TimelineAgentSpawnCtx>
       </TimelineRowActivityCtx>
     </TimelineRowCtx>
   );
@@ -1687,9 +1715,75 @@ function v2EventPresentation(item: OrchestrationV2TurnItem): {
   }
 }
 
+const AgentSpawnCtaRow = memo(function AgentSpawnCtaRow(props: {
+  readonly item: Extract<OrchestrationV2TurnItem, { readonly type: "subagent" }>;
+  readonly createdAt: string;
+}) {
+  const shared = use(TimelineRowCtx);
+  const { ctaByItemId, onOpenAgents } = use(TimelineAgentSpawnCtx);
+  const group = ctaByItemId.get(props.item.id);
+  if (group === undefined) {
+    return (
+      <V2LifecycleRow
+        item={props.item}
+        createdAt={props.createdAt}
+        timestampFormat={shared.timestampFormat}
+        providerStatuses={shared.providerStatuses}
+        runs={shared.runs}
+        onOpenThread={shared.onOpenThread}
+      />
+    );
+  }
+
+  let working = 0;
+  let failed = 0;
+  let stopped = 0;
+  for (const agent of group.agents) {
+    if (agent.status === "pending" || agent.status === "running" || agent.status === "waiting") {
+      working += 1;
+    } else if (agent.status === "failed") {
+      failed += 1;
+    } else if (agent.status === "cancelled" || agent.status === "interrupted") {
+      stopped += 1;
+    }
+  }
+
+  const count = group.agents.length;
+  const live = working > 0;
+  const lead = `${live ? "Kicked off" : "Ran"} ${count} agent${count === 1 ? "" : "s"}`;
+  const status = live
+    ? `${working} working`
+    : failed > 0
+      ? `${failed} failed`
+      : stopped > 0
+        ? `${stopped} stopped`
+        : "✓ completed";
+
+  return (
+    <button
+      type="button"
+      aria-label="Open Agents panel"
+      onClick={onOpenAgents}
+      data-v2-item-type="subagent"
+      data-agent-spawn-cta="true"
+      className="flex w-full cursor-pointer items-center gap-2 rounded-md border border-border/60 bg-card/50 px-2.5 py-1.5 text-left text-[13px] transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+    >
+      <BotIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+      <span className="min-w-0 truncate font-medium">{lead}</span>
+      <span className="ml-auto flex min-w-0 items-center gap-2 font-mono text-[.7rem] text-muted-foreground">
+        <span className="truncate">{status}</span>
+        <span className="shrink-0 text-info-foreground">{live ? "Open Agents ▸" : "View ▸"}</span>
+      </span>
+    </button>
+  );
+});
+
 function V2EventTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "event" }> }) {
   const ctx = use(TimelineRowCtx);
   const { item, visibility, sourceThreadId } = row.projectedItem;
+  if (item.type === "subagent") {
+    return <AgentSpawnCtaRow item={item} createdAt={row.createdAt} />;
+  }
   if (isV2LifecycleItem(item)) {
     return (
       <V2LifecycleRow

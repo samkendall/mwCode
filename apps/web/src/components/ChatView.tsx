@@ -7394,6 +7394,7 @@ function ChatViewContent(props: ChatViewProps) {
                 routeThreadKey={routeThreadKey}
                 onOpenTurnDiff={onOpenTurnDiff}
                 onOpenThread={onOpenRelatedThread}
+                onOpenAgents={addAgentsSurface}
                 parentThreadLink={parentThreadLink}
                 onForkFromRun={onForkFromRun}
                 onRollbackCheckpoint={(input) => void onRollbackCheckpoint(input)}

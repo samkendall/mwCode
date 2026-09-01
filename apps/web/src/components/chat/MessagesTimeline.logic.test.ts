@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vite-plus/test";
-import { RunId, ThreadId, TurnItemId } from "@t3tools/contracts";
-import * as DateTime from "effect/DateTime";
-import type { WorkLogEntry } from "../../session-logic";
 import {
+  RunId,
+  ThreadId,
+  TurnItemId,
+  type OrchestrationV2TurnItemStatus,
+} from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
+import type { TimelineEntry, WorkLogEntry } from "../../session-logic";
+import {
+  collapseSubagentTimelineEntries,
   computeStableMessagesTimelineRows,
   computeMessageDurationStart,
   deriveMessagesTimelineRows,
@@ -12,6 +18,102 @@ import {
   shouldPreserveAssistantLineBreaks,
   summarizeToolGroup,
 } from "./MessagesTimeline.logic";
+
+function subagentTimelineEntry(
+  id: string,
+  runId: string | null,
+  status: OrchestrationV2TurnItemStatus,
+  subagentId = id,
+): TimelineEntry {
+  return {
+    id,
+    kind: "event",
+    createdAt: "2026-08-29T00:00:00Z",
+    projectedItem: {
+      position: 0,
+      visibility: "local",
+      sourceThreadId: "thread-parent",
+      sourceItemId: id,
+      item: {
+        id,
+        threadId: "thread-parent",
+        runId,
+        nodeId: subagentId,
+        providerThreadId: null,
+        providerTurnId: null,
+        nativeItemRef: null,
+        parentItemId: null,
+        ordinal: 0,
+        status,
+        title: subagentId,
+        startedAt: null,
+        completedAt: null,
+        updatedAt: {},
+        type: "subagent",
+        subagentId,
+        origin: "provider_native",
+        driver: "codex",
+        providerInstanceId: "codex",
+        childThreadId: null,
+        prompt: null,
+        progress: null,
+        result: null,
+      },
+    } as never,
+  };
+}
+
+describe("collapseSubagentTimelineEntries", () => {
+  it("keeps one anchor per run and derives its roster from projected items", () => {
+    const entries: TimelineEntry[] = [
+      subagentTimelineEntry("agent-a", "run-1", "running"),
+      subagentTimelineEntry("agent-b", "run-1", "completed"),
+      subagentTimelineEntry("agent-c", "run-2", "failed"),
+      subagentTimelineEntry("orphan-a", null, "running"),
+      subagentTimelineEntry("orphan-b", null, "running"),
+    ];
+
+    const result = collapseSubagentTimelineEntries(entries);
+
+    expect(result.timelineEntries.map((entry) => entry.id)).toEqual([
+      "agent-a",
+      "agent-c",
+      "orphan-a",
+      "orphan-b",
+    ]);
+    expect(result.ctaByItemId.get("agent-a")).toEqual({
+      agents: [
+        { id: "agent-a", status: "running" },
+        { id: "agent-b", status: "completed" },
+      ],
+    });
+    expect(result.ctaByItemId.get("agent-c")).toEqual({
+      agents: [{ id: "agent-c", status: "failed" }],
+    });
+  });
+
+  it("returns the original timeline when there are no subagents", () => {
+    const entries: TimelineEntry[] = [
+      {
+        id: "work-1",
+        kind: "work",
+        createdAt: "2026-08-29T00:00:00Z",
+        entry: {
+          id: "work-1",
+          createdAt: "2026-08-29T00:00:00Z",
+          label: "Read file",
+          tone: "tool",
+          toolLifecycleStatus: "completed",
+        },
+      },
+    ];
+
+    const result = collapseSubagentTimelineEntries(entries);
+
+    expect(result.timelineEntries).toBe(entries);
+    expect(result.ctaByItemId.size).toBe(0);
+  });
+});
 
 describe("summarizeToolGroup", () => {
   const now = DateTime.makeUnsafe("2026-08-29T00:00:00Z");

@@ -14,6 +14,7 @@ import { type ChatMessage, type ProposedPlan, type TurnDiffSummary } from "../..
 import {
   type MessageId,
   type OrchestrationV2ProjectedTurnItem,
+  type OrchestrationV2TurnItemStatus,
   type RunAttemptId,
   type RunId,
 } from "@t3tools/contracts";
@@ -189,6 +190,65 @@ export type TimelineLatestRun = Pick<
   ThreadRunSummary,
   "runId" | "status" | "startedAt" | "completedAt"
 >;
+
+export interface AgentSpawnCtaGroup {
+  readonly agents: ReadonlyArray<{
+    readonly id: string;
+    readonly status: OrchestrationV2TurnItemStatus;
+  }>;
+}
+
+/**
+ * Keeps one timeline anchor for the subagents spawned by a run. The V2
+ * projection remains the source of truth; this only removes duplicate roster
+ * rows now that the Agents panel owns their details.
+ */
+export function collapseSubagentTimelineEntries(entries: ReadonlyArray<TimelineEntry>): {
+  readonly timelineEntries: ReadonlyArray<TimelineEntry>;
+  readonly ctaByItemId: ReadonlyMap<string, AgentSpawnCtaGroup>;
+} {
+  interface GroupBuilder {
+    readonly anchorItemId: string;
+    readonly agentsById: Map<string, OrchestrationV2TurnItemStatus>;
+  }
+
+  const timelineEntries: TimelineEntry[] = [];
+  const groupsByKey = new Map<string, GroupBuilder>();
+
+  for (const entry of entries) {
+    if (entry.kind !== "event" || entry.projectedItem.item.type !== "subagent") {
+      timelineEntries.push(entry);
+      continue;
+    }
+
+    const item = entry.projectedItem.item;
+    const groupKey = item.runId === null ? `item:${item.id}` : `run:${item.runId}`;
+    const existing = groupsByKey.get(groupKey);
+    if (existing === undefined) {
+      groupsByKey.set(groupKey, {
+        anchorItemId: item.id,
+        agentsById: new Map([[item.subagentId, item.status]]),
+      });
+      timelineEntries.push(entry);
+      continue;
+    }
+
+    existing.agentsById.set(item.subagentId, item.status);
+  }
+
+  if (groupsByKey.size === 0) {
+    return { timelineEntries: entries, ctaByItemId: new Map() };
+  }
+
+  const ctaByItemId = new Map<string, AgentSpawnCtaGroup>();
+  for (const group of groupsByKey.values()) {
+    ctaByItemId.set(group.anchorItemId, {
+      agents: [...group.agentsById].map(([id, status]) => ({ id, status })),
+    });
+  }
+
+  return { timelineEntries, ctaByItemId };
+}
 
 export type MessagesTimelineRow =
   | {
