@@ -93,6 +93,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           pin_order_key,
           work_type,
           stage,
+          stage_manual,
           created_at,
           updated_at,
           deleted_at
@@ -116,6 +117,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           'gm',
           'feature',
           'in-review',
+          1,
           '2026-02-24T00:00:02.000Z',
           '2026-02-24T00:00:03.000Z',
           NULL
@@ -341,6 +343,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           pinOrderKey: "gm",
           workType: "feature",
           stage: "in-review",
+          stageManual: true,
           titleRegeneration: null,
           deletedAt: null,
           messages: [
@@ -469,6 +472,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           pinOrderKey: "gm",
           workType: "feature",
           stage: "in-review",
+          stageManual: true,
           titleRegeneration: null,
           session: {
             threadId: ThreadId.make("thread-1"),

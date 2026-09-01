@@ -852,6 +852,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             : {}),
           ...(command.workType !== undefined ? { workType: command.workType } : {}),
           ...(command.stage !== undefined ? { stage: command.stage } : {}),
+          ...(command.stageManual !== undefined ? { stageManual: command.stageManual } : {}),
           updatedAt: occurredAt,
         },
       };

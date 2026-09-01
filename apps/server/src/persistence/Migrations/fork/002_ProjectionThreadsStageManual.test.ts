@@ -8,8 +8,8 @@ import * as NodeSqliteClient from "../../NodeSqliteClient.ts";
 
 const layer = it.layer(Layer.mergeAll(NodeSqliteClient.layerMemory()));
 
-layer("fork/001_ProjectionThreadsWorkTypeAndStage", (it) => {
-  it.effect("adds the work_type and stage columns", () =>
+layer("fork/002_ProjectionThreadsStageManual", (it) => {
+  it.effect("adds the stage_manual column", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
 
@@ -18,8 +18,7 @@ layer("fork/001_ProjectionThreadsWorkTypeAndStage", (it) => {
       const columns = yield* sql<{ readonly name: string }>`
         PRAGMA table_info(projection_threads)
       `;
-      assert.ok(columns.some((column) => column.name === "work_type"));
-      assert.ok(columns.some((column) => column.name === "stage"));
+      assert.ok(columns.some((column) => column.name === "stage_manual"));
     }),
   );
 
@@ -29,47 +28,42 @@ layer("fork/001_ProjectionThreadsWorkTypeAndStage", (it) => {
 
       yield* runMigrations();
       // A second full run must not attempt a duplicate ALTER TABLE; the fork
-      // Migrator sees id 1 already recorded and the guard in the body holds.
+      // Migrator sees id 2 already recorded and the guard in the body holds.
       yield* runMigrations();
 
       const columns = yield* sql<{ readonly name: string }>`
         PRAGMA table_info(projection_threads)
       `;
-      assert.strictEqual(columns.filter((column) => column.name === "work_type").length, 1);
-      assert.strictEqual(columns.filter((column) => column.name === "stage").length, 1);
+      assert.strictEqual(columns.filter((column) => column.name === "stage_manual").length, 1);
     }),
   );
 
-  it.effect("tracks fork migrations in a separate table from upstream", () =>
+  it.effect("records fork ids 1 and 2 in the separate fork tracking table", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;
 
       yield* runMigrations();
 
-      // Upstream ids live in effect_sql_migrations; the fork id lives only in
-      // effect_sql_migrations_fork. The two sequences never share a table, so a
-      // fork id can never shadow a future upstream migration.
-      const upstream = yield* sql<{ migration_id: number; name: string }>`
-        SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id
-      `;
       const fork = yield* sql<{ migration_id: number; name: string }>`
         SELECT migration_id, name FROM ${sql(FORK_MIGRATIONS_TABLE)} ORDER BY migration_id
       `;
-
-      assert.ok(upstream.length >= 43);
-      assert.ok(
-        !upstream.some(
-          (row) =>
-            Number(row.migration_id) === 1 &&
-            row.name.startsWith("ProjectionThreadsWorkTypeAndStage"),
-        ),
-      );
       assert.deepEqual(
         fork.map((row) => [Number(row.migration_id), row.name]),
         [
           [1, "ProjectionThreadsWorkTypeAndStage"],
           [2, "ProjectionThreadsStageManual"],
         ],
+      );
+
+      // The fork ids must never leak into the upstream tracking table.
+      const upstream = yield* sql<{ migration_id: number; name: string }>`
+        SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id
+      `;
+      assert.ok(
+        !upstream.some(
+          (row) =>
+            Number(row.migration_id) === 2 && row.name.startsWith("ProjectionThreadsStageManual"),
+        ),
       );
     }),
   );

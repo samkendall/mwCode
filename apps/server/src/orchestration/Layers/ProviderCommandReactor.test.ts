@@ -916,6 +916,145 @@ describe("ProviderCommandReactor", () => {
       expect(thread?.workType ?? null).toBeNull();
       expect(thread?.stage ?? null).toBeNull();
     });
+
+    // Seeds a thread with a known workType+stage from the first turn so the
+    // follow-up-turn re-assessment has a non-null stage to move.
+    const seedFirstTurnClassification = async (
+      harness: Awaited<ReturnType<typeof createHarness>>,
+    ) => {
+      harness.classifyThread.mockReturnValueOnce(
+        Effect.succeed({ workType: "bug", stage: "research" }),
+      );
+      await startFirstTurn(harness, "The reconnect loop crashes after restart.");
+      await waitFor(async () => {
+        const thread = await threadMeta(harness);
+        return thread?.workType === "bug" && thread?.stage === "research";
+      });
+    };
+
+    it("re-assesses only the stage on a follow-up turn, overwriting the existing stage", async () => {
+      const harness = await createHarness();
+      await seedFirstTurnClassification(harness);
+
+      // Follow-up turn: the stage-only re-assessment advances the stage even
+      // though it is already non-null (that is the whole point).
+      harness.classifyThread.mockReturnValue(
+        Effect.succeed({ workType: "feature", stage: "building" }),
+      );
+      await startFirstTurn(harness, "That is fixed now, let's build the reconnect banner.");
+      await waitFor(async () => (await threadMeta(harness))?.stage === "building");
+
+      const thread = await threadMeta(harness);
+      expect(thread?.stage).toBe("building");
+      // workType is sticky: re-assessment never touches it even when the model
+      // would have returned a different one.
+      expect(thread?.workType).toBe("bug");
+
+      // The follow-up call was stage-only: no work type requested or offered.
+      const lastCall = harness.classifyThread.mock.calls.at(-1)?.[0];
+      expect(lastCall?.includeWorkType).toBe(false);
+      expect(lastCall?.workTypes).toEqual([]);
+      expect((lastCall?.stages.length ?? 0) > 0).toBe(true);
+    });
+
+    it("does not re-assess a manually pinned stage on a follow-up turn", async () => {
+      const harness = await createHarness();
+      await seedFirstTurnClassification(harness);
+
+      // The user pins the stage by hand (stageManual: true); auto re-assessment
+      // must stand down.
+      await harness.runEffect(
+        harness.engine.dispatch({
+          type: "thread.meta.update",
+          commandId: CommandId.make("cmd-pin-stage"),
+          threadId: ThreadId.make("thread-1"),
+          stage: "planning",
+          stageManual: true,
+        }),
+      );
+      await waitFor(async () => {
+        const thread = await threadMeta(harness);
+        return thread?.stageManual === true && thread?.stage === "planning";
+      });
+
+      const classifyCallsBefore = harness.classifyThread.mock.calls.length;
+      harness.classifyThread.mockReturnValue(Effect.succeed({ workType: null, stage: "building" }));
+      await startFirstTurn(harness, "Now start building it.");
+      await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+      await harness.drain();
+
+      const thread = await threadMeta(harness);
+      // The pinned stage survives and the model was never consulted again.
+      expect(thread?.stage).toBe("planning");
+      expect(thread?.stageManual).toBe(true);
+      expect(harness.classifyThread.mock.calls.length).toBe(classifyCallsBefore);
+    });
+
+    it("re-assesses the stage again once the manual lock is released", async () => {
+      const harness = await createHarness();
+      await seedFirstTurnClassification(harness);
+
+      // Pin, then resume auto (stageManual: false) — the client sends this when
+      // the user unlocks the stage.
+      await harness.runEffect(
+        harness.engine.dispatch({
+          type: "thread.meta.update",
+          commandId: CommandId.make("cmd-pin-stage-2"),
+          threadId: ThreadId.make("thread-1"),
+          stage: "planning",
+          stageManual: true,
+        }),
+      );
+      await waitFor(async () => (await threadMeta(harness))?.stageManual === true);
+      await harness.runEffect(
+        harness.engine.dispatch({
+          type: "thread.meta.update",
+          commandId: CommandId.make("cmd-unpin-stage"),
+          threadId: ThreadId.make("thread-1"),
+          stageManual: false,
+        }),
+      );
+      await waitFor(async () => (await threadMeta(harness))?.stageManual === false);
+
+      harness.classifyThread.mockReturnValue(Effect.succeed({ workType: null, stage: "building" }));
+      await startFirstTurn(harness, "Keep going on the implementation.");
+      await waitFor(async () => (await threadMeta(harness))?.stage === "building");
+
+      const thread = await threadMeta(harness);
+      expect(thread?.stage).toBe("building");
+      expect(thread?.stageManual).toBe(false);
+    });
+
+    it("does not re-assess the stage when autoClassifyThreads is disabled for the turn", async () => {
+      const harness = await createHarness();
+      await seedFirstTurnClassification(harness);
+
+      const classifyCallsBefore = harness.classifyThread.mock.calls.length;
+      harness.classifyThread.mockReturnValue(Effect.succeed({ workType: null, stage: "building" }));
+      await startFirstTurn(harness, "Keep going.", { autoClassifyThreads: false });
+      await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+      await harness.drain();
+
+      const thread = await threadMeta(harness);
+      expect(thread?.stage).toBe("research");
+      expect(harness.classifyThread.mock.calls.length).toBe(classifyCallsBefore);
+    });
+
+    it("leaves the follow-up turn running when stage re-assessment fails", async () => {
+      const harness = await createHarness();
+      await seedFirstTurnClassification(harness);
+
+      harness.classifyThread.mockReturnValue(
+        Effect.fail(new TextGenerationError({ operation: "classifyThread", detail: "boom" })),
+      );
+      await startFirstTurn(harness, "Keep going despite the classifier being down.");
+      await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+      await harness.drain();
+
+      // Fail-soft: the turn proceeds and the stage is left untouched.
+      const thread = await threadMeta(harness);
+      expect(thread?.stage).toBe("research");
+    });
   });
 
   it("regenerates a thread title from the current conversation", async () => {

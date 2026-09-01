@@ -6,6 +6,7 @@ import type {
   OrchestrationProjectShell,
   ProjectId,
   PullRequestReviewCapabilities,
+  PullRequestReviewDecision,
   PullRequestReviewerCapabilities,
   SourceControlProviderKind,
 } from "@t3tools/contracts";
@@ -2872,6 +2873,58 @@ it.effect("carries an armed auto-merge through to the detail, and silence as sil
     assert.strictEqual((yield* detailWith(false)).autoMergeEnabled, false);
     // A host that says nothing leaves the field absent rather than claiming the merge is unarmed.
     assert.isUndefined((yield* detailWith(undefined)).autoMergeEnabled);
+  }),
+);
+
+it.effect("carries the host's rolled-up review decision through to the detail", () =>
+  Effect.gen(function* () {
+    const detailWith = (reviewDecision: PullRequestReviewDecision | null | undefined) =>
+      Effect.gen(function* () {
+        const service = yield* makeService({
+          projects: [
+            project({ id: "p1", title: "web", workspaceRoot: "/a", repository: "acme/web" }),
+          ],
+          providers: [
+            fakeProvider("github", {
+              getChangeRequest: () =>
+                Effect.succeed({
+                  ...changeRequest(1, "2026-07-02T00:00:00Z"),
+                  body: "",
+                  changedFiles: 0,
+                  mergedAt: null,
+                  closedAt: null,
+                  reviewers: [],
+                  checks: [],
+                  mergeCapabilities: { merge: true, squash: true, rebase: true },
+                  viewerPermissions: {
+                    actions: ["merge"],
+                    comment: true,
+                    resolve: true,
+                    verdicts: ["comment", "approve", "request-changes"],
+                    requestReviewers: true,
+                  },
+                  ...(reviewDecision === undefined ? {} : { reviewDecision }),
+                }),
+            }),
+          ],
+        });
+        return yield* service.detail({
+          projectId: "p1" as ProjectId,
+          repository: "acme/web",
+          number: 1,
+        });
+      });
+
+    assert.strictEqual((yield* detailWith("approved")).reviewDecision, "approved");
+    assert.strictEqual(
+      (yield* detailWith("changes-requested")).reviewDecision,
+      "changes-requested",
+    );
+    assert.strictEqual((yield* detailWith("review-required")).reviewDecision, "review-required");
+    // A host with no verdict (a draft nobody has reviewed) leaves the field absent rather than
+    // claiming a review is required.
+    assert.isUndefined((yield* detailWith(null)).reviewDecision);
+    assert.isUndefined((yield* detailWith(undefined)).reviewDecision);
   }),
 );
 

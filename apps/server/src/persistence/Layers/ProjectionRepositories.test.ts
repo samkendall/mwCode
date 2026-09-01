@@ -312,4 +312,63 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
       assert.strictEqual(Option.getOrNull(cleared)?.stage, null);
     }),
   );
+
+  it.effect("round-trips stageManual as a boolean and defaults to null", () =>
+    Effect.gen(function* () {
+      const threads = yield* ProjectionThreadRepository;
+
+      // stageManual omitted on insert must decode back as null (INTEGER column
+      // with no value), never undefined or 0.
+      yield* threads.upsert({
+        threadId: ThreadId.make("thread-stage-manual"),
+        projectId: ProjectId.make("project-stage-manual"),
+        title: "Stage manual thread",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5.4",
+        },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        latestTurnId: null,
+        createdAt: "2026-03-24T00:00:00.000Z",
+        updatedAt: "2026-03-24T00:00:00.000Z",
+        archivedAt: null,
+        settledOverride: null,
+        settledAt: null,
+        unsettledAt: null,
+        snoozedUntil: null,
+        snoozedAt: null,
+        pinnedAt: null,
+        workType: null,
+        stage: "building",
+        latestUserMessageAt: null,
+        pendingApprovalCount: 0,
+        pendingUserInputCount: 0,
+        hasActionableProposedPlan: 0,
+        deletedAt: null,
+      });
+
+      const initial = yield* threads.getById({ threadId: ThreadId.make("thread-stage-manual") });
+      const initialRow = Option.getOrNull(initial);
+      if (initialRow === null) return yield* Effect.die("Expected stage-manual thread to exist.");
+      assert.strictEqual(initialRow.stageManual ?? null, null);
+
+      // Pinning the stage (true) must persist as INTEGER 1 and decode to true.
+      yield* threads.upsert({ ...initialRow, stageManual: true });
+      const locked = yield* threads.getById({ threadId: ThreadId.make("thread-stage-manual") });
+      assert.strictEqual(Option.getOrNull(locked)?.stageManual, true);
+
+      // Resuming auto (false) must persist as INTEGER 0 and decode to false.
+      yield* threads.upsert({ ...initialRow, stageManual: false });
+      const resumed = yield* threads.getById({ threadId: ThreadId.make("thread-stage-manual") });
+      assert.strictEqual(Option.getOrNull(resumed)?.stageManual, false);
+
+      // Clearing back to null must carry through to SQL NULL.
+      yield* threads.upsert({ ...initialRow, stageManual: null });
+      const cleared = yield* threads.getById({ threadId: ThreadId.make("thread-stage-manual") });
+      assert.strictEqual(Option.getOrNull(cleared)?.stageManual ?? null, null);
+    }),
+  );
 });

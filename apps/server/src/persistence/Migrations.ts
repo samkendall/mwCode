@@ -59,6 +59,7 @@ import Migration0043 from "./Migrations/043_ProjectionThreadsUnsettledAt.ts";
 // Fork-local migrations run through their OWN Migrator + tracking table and are
 // numbered from 1 in a separate sequence. See forkMigrationEntries below.
 import Migration0001Fork from "./Migrations/fork/001_ProjectionThreadsWorkTypeAndStage.ts";
+import Migration0002Fork from "./Migrations/fork/002_ProjectionThreadsStageManual.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -132,6 +133,7 @@ export const migrationEntries = [
  */
 export const forkMigrationEntries = [
   [1, "ProjectionThreadsWorkTypeAndStage", Migration0001Fork],
+  [2, "ProjectionThreadsStageManual", Migration0002Fork],
 ] as const;
 
 export const FORK_MIGRATIONS_TABLE = "effect_sql_migrations_fork";

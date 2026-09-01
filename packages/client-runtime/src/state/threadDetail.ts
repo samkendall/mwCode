@@ -65,6 +65,7 @@ export function mergeEnvironmentThread(
     pinOrderKey: shell.pinOrderKey,
     workType: shell.workType,
     stage: shell.stage,
+    stageManual: shell.stageManual,
     session: shell.session,
   };
 }

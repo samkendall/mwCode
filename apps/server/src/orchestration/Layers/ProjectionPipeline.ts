@@ -649,6 +649,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             // Classification starts null; only thread.meta.update sets it.
             workType: null,
             stage: null,
+            stageManual: null,
             titleRegenerationRequestId: null,
             titleRegenerationStartedAt: null,
             latestUserMessageAt: null,
@@ -840,6 +841,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               : {}),
             ...(event.payload.workType !== undefined ? { workType: event.payload.workType } : {}),
             ...(event.payload.stage !== undefined ? { stage: event.payload.stage } : {}),
+            ...(event.payload.stageManual !== undefined
+              ? { stageManual: event.payload.stageManual }
+              : {}),
             updatedAt: event.payload.updatedAt,
           });
           return;

@@ -1058,6 +1058,88 @@ const make = Effect.gen(function* () {
     },
   );
 
+  /**
+   * Per-turn stage re-assessment. Unlike the first-turn classifier this runs at
+   * the start of every follow-up turn (the conversation so far already reflects
+   * the completed turns), re-picking ONLY the stage so it can track session
+   * progress (research → planning → building → tweaking). workType is sticky and
+   * never touched here.
+   *
+   * Gate + overwrite discipline: skipped entirely when the user pinned the stage
+   * (`stageManual === true`). Otherwise it overwrites the stage even when it is
+   * already non-null — the whole point is that stage changes over time. The
+   * thread is re-read AFTER the (slow) model call so a manual lock set mid-flight
+   * still wins, and an unchanged stage is left alone. One lean, stage-only model
+   * call per follow-up turn. Fails soft: any error is logged and the turn
+   * continues.
+   */
+  const maybeReassessThreadStage = Effect.fn("maybeReassessThreadStage")(function* (input: {
+    readonly threadId: ThreadId;
+    readonly cwd: string;
+    readonly workspaceRoot: string | null;
+  }) {
+    yield* Effect.gen(function* () {
+      const global = yield* loadGlobalHarnessTaxonomy(serverConfig.baseDir);
+      const taxonomy = input.workspaceRoot
+        ? yield* resolveProjectHarnessTaxonomy(input.workspaceRoot, global)
+        : global;
+      if (taxonomy.stages.length === 0) {
+        return;
+      }
+
+      // Manual lock wins: never re-assess a stage the user pinned by hand.
+      const thread = yield* resolveThread(input.threadId);
+      if (!thread || thread.stageManual === true) {
+        return;
+      }
+
+      // Recent conversation context (same source the title regen uses) drives a
+      // lean, stage-only prompt. No work-type decision is requested.
+      const { message, attachments } = formatThreadTitleContext(thread.messages);
+      if (message.length === 0) {
+        return;
+      }
+
+      const { textGenerationModelSelection: modelSelection } =
+        yield* serverSettingsService.getSettings;
+      const generated = yield* textGeneration.classifyThread({
+        cwd: input.cwd,
+        message,
+        workTypes: [],
+        stages: taxonomy.stages,
+        includeWorkType: false,
+        ...(attachments.length > 0 ? { attachments } : {}),
+        modelSelection,
+      });
+      const resolvedStage = resolveTaxonomyId(taxonomy.stages, generated.stage);
+      if (resolvedStage === null) {
+        return;
+      }
+
+      // Re-read now that the (slow) call returned: a manual lock set during the
+      // call must win, and an unchanged stage needs no write.
+      const current = yield* resolveThread(input.threadId);
+      if (!current || current.stageManual === true || current.stage === resolvedStage) {
+        return;
+      }
+
+      yield* orchestrationEngine.dispatch({
+        type: "thread.meta.update",
+        commandId: yield* serverCommandId("thread-reassess-stage"),
+        threadId: input.threadId,
+        stage: resolvedStage,
+      });
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("provider command reactor failed to re-assess thread stage", {
+          threadId: input.threadId,
+          cwd: input.cwd,
+          cause: Cause.pretty(cause),
+        }),
+      ),
+    );
+  });
+
   const regenerateThreadTitle = Effect.fn("regenerateThreadTitle")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.meta-updated" }>,
     requestId: CommandId,
@@ -1297,6 +1379,20 @@ const make = Effect.gen(function* () {
           ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
         }).pipe(Effect.forkScoped);
       }
+    } else if (event.payload.autoClassifyThreads !== false) {
+      // Follow-up turn: re-assess ONLY the stage so it tracks session progress.
+      // The prior turns are already complete and present in the conversation.
+      const project = yield* resolveProject(thread.projectId);
+      const generationCwd =
+        resolveThreadWorkspaceCwd({
+          thread,
+          projects: project ? [project] : [],
+        }) ?? process.cwd();
+      yield* maybeReassessThreadStage({
+        threadId: event.payload.threadId,
+        cwd: generationCwd,
+        workspaceRoot: project?.workspaceRoot ?? null,
+      }).pipe(Effect.forkScoped);
     }
 
     const handleTurnStartFailure = (cause: Cause.Cause<unknown>) => {

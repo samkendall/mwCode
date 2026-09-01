@@ -98,6 +98,7 @@ export function applyThreadDetailEvent(
           // Classification starts null; only thread.meta.update sets it.
           workType: null,
           stage: null,
+          stageManual: null,
           deletedAt: null,
           messages: [],
           proposedPlans: [],
@@ -234,6 +235,9 @@ export function applyThreadDetailEvent(
             : {}),
           ...(event.payload.workType !== undefined ? { workType: event.payload.workType } : {}),
           ...(event.payload.stage !== undefined ? { stage: event.payload.stage } : {}),
+          ...(event.payload.stageManual !== undefined
+            ? { stageManual: event.payload.stageManual }
+            : {}),
           updatedAt: event.payload.updatedAt,
         },
       };

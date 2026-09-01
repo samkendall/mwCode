@@ -310,6 +310,7 @@ export function projectEvent(
             // thread.meta.update (creation carries no classification).
             workType: null,
             stage: null,
+            stageManual: null,
             deletedAt: null,
             messages: [],
             activities: [],
@@ -477,6 +478,7 @@ export function projectEvent(
               : {}),
             ...(payload.workType !== undefined ? { workType: payload.workType } : {}),
             ...(payload.stage !== undefined ? { stage: payload.stage } : {}),
+            ...(payload.stageManual !== undefined ? { stageManual: payload.stageManual } : {}),
             updatedAt: payload.updatedAt,
           }),
         })),
