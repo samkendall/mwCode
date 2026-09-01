@@ -1055,6 +1055,161 @@ describe("ProviderCommandReactor", () => {
       const thread = await threadMeta(harness);
       expect(thread?.stage).toBe("research");
     });
+
+    // Seeds a half-classified thread: the first turn fills only the stage (the
+    // model returned a null work type), so the follow-up re-assessment inherits
+    // a non-null stage with a still-null work type.
+    const seedHalfClassifiedFirstTurn = async (
+      harness: Awaited<ReturnType<typeof createHarness>>,
+      firstMessage: string,
+    ) => {
+      harness.classifyThread.mockReturnValueOnce(
+        Effect.succeed({ workType: null, stage: "research" }),
+      );
+      await startFirstTurn(harness, firstMessage);
+      await waitFor(async () => (await threadMeta(harness))?.stage === "research");
+      const thread = await threadMeta(harness);
+      expect(thread?.workType ?? null).toBeNull();
+    };
+
+    it("fills both workType and stage on a follow-up turn when workType is still null", async () => {
+      const harness = await createHarness();
+      await seedHalfClassifiedFirstTurn(harness, "The reconnect loop crashes after restart.");
+
+      // Follow-up: the thread still lacks a work type, so the re-assessment must
+      // ask for BOTH and fill both.
+      harness.classifyThread.mockReturnValue(
+        Effect.succeed({ workType: "bug", stage: "building" }),
+      );
+      await startFirstTurn(harness, "That was harder than expected, let's dig in.");
+      await waitFor(async () => (await threadMeta(harness))?.stage === "building");
+      await waitFor(async () => (await threadMeta(harness))?.workType === "bug");
+
+      const thread = await threadMeta(harness);
+      expect(thread?.workType).toBe("bug");
+      expect(thread?.stage).toBe("building");
+      // The follow-up call requested the work type this time (no explicit tier).
+      const lastCall = harness.classifyThread.mock.calls.at(-1)?.[0];
+      expect(lastCall?.includeWorkType).toBe(true);
+      expect((lastCall?.workTypes.length ?? 0) > 0).toBe(true);
+    });
+
+    it("honors an explicit first-message tier when filling workType on a follow-up", async () => {
+      const harness = await createHarness();
+      // First turn had auto-classify off, so nothing was set — but the first
+      // message spelled out the tier.
+      await startFirstTurn(harness, "/momo feature add a share button to the toolbar", {
+        autoClassifyThreads: false,
+      });
+      await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+      await harness.drain();
+      expect((await threadMeta(harness))?.workType ?? null).toBeNull();
+
+      // Follow-up: the cheap parse resolves the work type, so the model is only
+      // asked for the stage, and the explicit tier is honored.
+      harness.classifyThread.mockReturnValue(
+        Effect.succeed({ workType: "bug", stage: "building" }),
+      );
+      await startFirstTurn(harness, "Keep going on the share button.");
+      await waitFor(async () => (await threadMeta(harness))?.workType === "feature");
+
+      const thread = await threadMeta(harness);
+      expect(thread?.workType).toBe("feature");
+      expect(thread?.stage).toBe("building");
+      // Parse won the work type, so the model was not asked for it.
+      const lastCall = harness.classifyThread.mock.calls.at(-1)?.[0];
+      expect(lastCall?.includeWorkType).toBe(false);
+      expect(lastCall?.workTypes).toEqual([]);
+    });
+
+    it("does not overwrite a non-null workType during a follow-up re-assessment", async () => {
+      const harness = await createHarness();
+      await seedFirstTurnClassification(harness);
+
+      // Follow-up: workType is already "bug", so the model must not be asked for
+      // a work type and the existing one must survive even if the model offers a
+      // different value.
+      harness.classifyThread.mockReturnValue(
+        Effect.succeed({ workType: "feature", stage: "building" }),
+      );
+      await startFirstTurn(harness, "That is fixed now, let's build the banner.");
+      await waitFor(async () => (await threadMeta(harness))?.stage === "building");
+
+      const thread = await threadMeta(harness);
+      expect(thread?.workType).toBe("bug");
+      expect(thread?.stage).toBe("building");
+      const lastCall = harness.classifyThread.mock.calls.at(-1)?.[0];
+      expect(lastCall?.includeWorkType).toBe(false);
+      expect(lastCall?.workTypes).toEqual([]);
+    });
+
+    it("skips the re-assessment model call once the stage is terminal and workType is set", async () => {
+      const harness = await createHarness();
+      // Seed a first turn that lands on the terminal stage (last taxonomy stage)
+      // with a work type already set.
+      harness.classifyThread.mockReturnValueOnce(
+        Effect.succeed({ workType: "bug", stage: "tweaking" }),
+      );
+      await startFirstTurn(harness, "The reconnect loop crashes after restart.");
+      await waitFor(async () => {
+        const thread = await threadMeta(harness);
+        return thread?.workType === "bug" && thread?.stage === "tweaking";
+      });
+
+      const classifyCallsBefore = harness.classifyThread.mock.calls.length;
+      harness.classifyThread.mockReturnValue(
+        Effect.succeed({ workType: "feature", stage: "building" }),
+      );
+      await startFirstTurn(harness, "Keep polishing.");
+      await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+      await harness.drain();
+
+      // Terminal stage + workType set: nothing left to reassess, no model call.
+      expect(harness.classifyThread.mock.calls.length).toBe(classifyCallsBefore);
+      const thread = await threadMeta(harness);
+      expect(thread?.stage).toBe("tweaking");
+      expect(thread?.workType).toBe("bug");
+    });
+
+    it("still re-assesses a non-terminal stage on a follow-up turn", async () => {
+      const harness = await createHarness();
+      await seedFirstTurnClassification(harness);
+
+      const classifyCallsBefore = harness.classifyThread.mock.calls.length;
+      harness.classifyThread.mockReturnValue(
+        Effect.succeed({ workType: "feature", stage: "building" }),
+      );
+      await startFirstTurn(harness, "Now start building it.");
+      await waitFor(async () => (await threadMeta(harness))?.stage === "building");
+
+      // "research" is not terminal, so the model call still fires.
+      expect(harness.classifyThread.mock.calls.length).toBe(classifyCallsBefore + 1);
+    });
+
+    it("still runs the re-assessment on a terminal stage when workType is null", async () => {
+      const harness = await createHarness();
+      // Terminal stage but no work type: FIX A must still fill the work type.
+      harness.classifyThread.mockReturnValueOnce(
+        Effect.succeed({ workType: null, stage: "tweaking" }),
+      );
+      await startFirstTurn(harness, "The reconnect loop crashes after restart.");
+      await waitFor(async () => (await threadMeta(harness))?.stage === "tweaking");
+      expect((await threadMeta(harness))?.workType ?? null).toBeNull();
+
+      const classifyCallsBefore = harness.classifyThread.mock.calls.length;
+      harness.classifyThread.mockReturnValue(
+        Effect.succeed({ workType: "bug", stage: "tweaking" }),
+      );
+      await startFirstTurn(harness, "Keep going.");
+      await waitFor(async () => (await threadMeta(harness))?.workType === "bug");
+
+      // The model was consulted (to fill the work type) despite the terminal stage.
+      expect(harness.classifyThread.mock.calls.length).toBe(classifyCallsBefore + 1);
+      const thread = await threadMeta(harness);
+      expect(thread?.workType).toBe("bug");
+      expect(thread?.stage).toBe("tweaking");
+      expect(harness.classifyThread.mock.calls.at(-1)?.[0].includeWorkType).toBe(true);
+    });
   });
 
   it("regenerates a thread title from the current conversation", async () => {

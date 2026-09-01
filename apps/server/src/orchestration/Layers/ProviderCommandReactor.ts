@@ -1061,17 +1061,32 @@ const make = Effect.gen(function* () {
   /**
    * Per-turn stage re-assessment. Unlike the first-turn classifier this runs at
    * the start of every follow-up turn (the conversation so far already reflects
-   * the completed turns), re-picking ONLY the stage so it can track session
-   * progress (research → planning → building → tweaking). workType is sticky and
-   * never touched here.
+   * the completed turns), re-picking the stage so it can track session progress
+   * (research → planning → building → tweaking).
+   *
+   * workType is normally sticky and left untouched. The one exception is a
+   * half-classified thread: if it reached a follow-up turn with a null workType
+   * (auto-classify was off on the first turn, or a second turn started before
+   * the first-turn classifier fork finished), this pass ALSO fills workType in
+   * the same model call so the sidebar never shows a stage chip with no
+   * work-type chip. That fill is sticky too — workType is only ever written
+   * while still null, never overwritten — and it honors an explicit `/momo
+   * feature`-style tier in the first user message via the same cheap parse the
+   * first-turn classifier uses (skipping the model's work-type decision).
    *
    * Gate + overwrite discipline: skipped entirely when the user pinned the stage
-   * (`stageManual === true`). Otherwise it overwrites the stage even when it is
+   * (`stageManual === true`). It otherwise overwrites the stage even when it is
    * already non-null — the whole point is that stage changes over time. The
    * thread is re-read AFTER the (slow) model call so a manual lock set mid-flight
-   * still wins, and an unchanged stage is left alone. One lean, stage-only model
-   * call per follow-up turn. Fails soft: any error is logged and the turn
-   * continues.
+   * still wins, and an unchanged stage is left alone.
+   *
+   * Terminal-stage short-circuit: taxonomy stage order is a progression and the
+   * last entry is terminal (it cannot advance further). Once the stage is that
+   * terminal id AND workType is already set, there is nothing left to decide, so
+   * the whole pass — model call included — is skipped to bound per-turn cost.
+   * It still runs when workType is null (so the fill above can happen) or when
+   * the stage is null or non-terminal. One lean model call per follow-up turn
+   * otherwise. Fails soft: any error is logged and the turn continues.
    */
   const maybeReassessThreadStage = Effect.fn("maybeReassessThreadStage")(function* (input: {
     readonly threadId: ThreadId;
@@ -1093,33 +1108,72 @@ const make = Effect.gen(function* () {
         return;
       }
 
-      // Recent conversation context (same source the title regen uses) drives a
-      // lean, stage-only prompt. No work-type decision is requested.
+      // A half-classified thread (stage filled, workType still null) needs its
+      // workType filled in this same pass.
+      const needsWorkType = thread.workType == null && taxonomy.workTypes.length > 0;
+
+      // Terminal-stage short-circuit (bounds per-turn model cost): the last
+      // stage id is the end of the progression and cannot advance, so once we
+      // are there and workType is already set there is nothing to reassess.
+      // Still proceed when workType is null (the fill below must run) or when the
+      // stage is null / not yet terminal.
+      const terminalStageId = taxonomy.stages[taxonomy.stages.length - 1]?.id;
+      if (!needsWorkType && terminalStageId !== undefined && thread.stage === terminalStageId) {
+        return;
+      }
+
+      // Recent conversation context (same source the title regen uses) drives
+      // the prompt. The stage is always re-decided; the work type is only asked
+      // for when it is missing AND the first message did not spell it out.
       const { message, attachments } = formatThreadTitleContext(thread.messages);
       if (message.length === 0) {
         return;
       }
+
+      // Cheap parse of the first user message: an explicit tier (`/momo
+      // feature ...`) overrides the model and spares it the work-type decision.
+      const parsedWorkType = needsWorkType
+        ? parseExplicitWorkType(
+            thread.messages.find((entry) => entry.role === "user")?.text ?? "",
+            taxonomy,
+          )
+        : null;
+      const includeWorkType = needsWorkType && parsedWorkType === null;
 
       const { textGenerationModelSelection: modelSelection } =
         yield* serverSettingsService.getSettings;
       const generated = yield* textGeneration.classifyThread({
         cwd: input.cwd,
         message,
-        workTypes: [],
+        workTypes: includeWorkType ? taxonomy.workTypes : [],
         stages: taxonomy.stages,
-        includeWorkType: false,
+        includeWorkType,
         ...(attachments.length > 0 ? { attachments } : {}),
         modelSelection,
       });
       const resolvedStage = resolveTaxonomyId(taxonomy.stages, generated.stage);
-      if (resolvedStage === null) {
+      // Validate every candidate id; parse wins over the model for work type.
+      const resolvedWorkType = needsWorkType
+        ? (parsedWorkType ?? resolveTaxonomyId(taxonomy.workTypes, generated.workType))
+        : null;
+      if (resolvedStage === null && resolvedWorkType === null) {
         return;
       }
 
       // Re-read now that the (slow) call returned: a manual lock set during the
-      // call must win, and an unchanged stage needs no write.
+      // call must win for the stage, an unchanged stage needs no write, and
+      // workType is only filled while it is still null.
       const current = yield* resolveThread(input.threadId);
-      if (!current || current.stageManual === true || current.stage === resolvedStage) {
+      if (!current) {
+        return;
+      }
+      const stageToWrite =
+        resolvedStage !== null && current.stageManual !== true && current.stage !== resolvedStage
+          ? resolvedStage
+          : null;
+      const workTypeToWrite =
+        resolvedWorkType !== null && current.workType == null ? resolvedWorkType : null;
+      if (stageToWrite === null && workTypeToWrite === null) {
         return;
       }
 
@@ -1127,7 +1181,8 @@ const make = Effect.gen(function* () {
         type: "thread.meta.update",
         commandId: yield* serverCommandId("thread-reassess-stage"),
         threadId: input.threadId,
-        stage: resolvedStage,
+        ...(stageToWrite !== null ? { stage: stageToWrite } : {}),
+        ...(workTypeToWrite !== null ? { workType: workTypeToWrite } : {}),
       });
     }).pipe(
       Effect.catchCause((cause) =>
