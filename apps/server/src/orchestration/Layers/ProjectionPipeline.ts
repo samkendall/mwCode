@@ -646,6 +646,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             snoozedAt: null,
             pinnedAt: null,
             pinOrderKey: null,
+            workType: event.payload.workType ?? null,
+            stage: event.payload.stage ?? null,
             titleRegenerationRequestId: null,
             titleRegenerationStartedAt: null,
             latestUserMessageAt: null,
@@ -835,6 +837,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             ...(event.payload.linkedPullRequest !== undefined
               ? { linkedPullRequest: event.payload.linkedPullRequest }
               : {}),
+            ...(event.payload.workType !== undefined ? { workType: event.payload.workType } : {}),
+            ...(event.payload.stage !== undefined ? { stage: event.payload.stage } : {}),
             updatedAt: event.payload.updatedAt,
           });
           return;

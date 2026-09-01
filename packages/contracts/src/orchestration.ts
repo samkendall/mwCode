@@ -474,6 +474,11 @@ export const OrchestrationThread = Schema.Struct({
   // servers never need each other's threads to agree on the merged list.
   // Optional so payloads from pre-reorder servers still decode.
   pinOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  // Fork-local classification metadata. Deliberately plain strings: the
+  // allowed values come from a runtime-config taxonomy, so the wire contract
+  // must not pin them down. Optional/nullable for old-client interop.
+  workType: Schema.optional(Schema.NullOr(Schema.String)),
+  stage: Schema.optional(Schema.NullOr(Schema.String)),
   // Pending-only state. Optional so older servers remain compatible.
   titleRegeneration: Schema.optional(Schema.NullOr(ThreadTitleRegeneration)),
   deletedAt: Schema.NullOr(IsoDateTime),
@@ -536,6 +541,9 @@ export const OrchestrationThreadShell = Schema.Struct({
   snoozedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   pinnedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   pinOrderKey: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  // See OrchestrationThread.workType/stage: fork-local, taxonomy-free strings.
+  workType: Schema.optional(Schema.NullOr(Schema.String)),
+  stage: Schema.optional(Schema.NullOr(Schema.String)),
   titleRegeneration: Schema.optional(Schema.NullOr(ThreadTitleRegeneration)),
   session: Schema.NullOr(OrchestrationSession),
   latestUserMessageAt: Schema.NullOr(IsoDateTime),
@@ -745,6 +753,10 @@ const ThreadCreateCommand = Schema.Struct({
   ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  // Optional classification metadata, set at creation when the caller already
+  // knows it. Values are validated against a runtime taxonomy, not the schema.
+  workType: Schema.optional(Schema.NullOr(Schema.String)),
+  stage: Schema.optional(Schema.NullOr(Schema.String)),
   createdAt: IsoDateTime,
 });
 
@@ -841,6 +853,9 @@ const ThreadMetaUpdateCommand = Schema.Struct({
   expectedBranch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
+  // Absent = leave unchanged; null = clear.
+  workType: Schema.optional(Schema.NullOr(Schema.String)),
+  stage: Schema.optional(Schema.NullOr(Schema.String)),
 }).check(
   Schema.makeFilter(
     (input) =>
@@ -1202,6 +1217,10 @@ export const ThreadCreatedPayload = Schema.Struct({
   ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  // See OrchestrationThread.workType/stage. Optional so events written by
+  // pre-classification servers still decode.
+  workType: Schema.optional(Schema.NullOr(Schema.String)),
+  stage: Schema.optional(Schema.NullOr(Schema.String)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -1285,6 +1304,9 @@ export const ThreadMetaUpdatedPayload = Schema.Struct({
   branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
+  /** Absent = unchanged; null = cleared. See OrchestrationThread.workType. */
+  workType: Schema.optional(Schema.NullOr(Schema.String)),
+  stage: Schema.optional(Schema.NullOr(Schema.String)),
   updatedAt: IsoDateTime,
 });
 

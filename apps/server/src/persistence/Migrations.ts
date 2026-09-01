@@ -56,6 +56,9 @@ import Migration0040 from "./Migrations/040_ProjectionProjectFaviconPath.ts";
 import Migration0041 from "./Migrations/041_AuthSessionClientConnection.ts";
 import Migration0042 from "./Migrations/042_ProjectionThreadLinkedPullRequest.ts";
 import Migration0043 from "./Migrations/043_ProjectionThreadsUnsettledAt.ts";
+// Fork-local migrations live at 900+ so upstream's sequential slots never
+// collide with ours. Slot ids only need to be increasing, not contiguous.
+import Migration0900 from "./Migrations/900_ProjectionThreadsWorkTypeAndStage.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -111,6 +114,7 @@ export const migrationEntries = [
   [41, "AuthSessionClientConnection", Migration0041],
   [42, "ProjectionThreadLinkedPullRequest", Migration0042],
   [43, "ProjectionThreadsUnsettledAt", Migration0043],
+  [900, "ProjectionThreadsWorkTypeAndStage", Migration0900],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

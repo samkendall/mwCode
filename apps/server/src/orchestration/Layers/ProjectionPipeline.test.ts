@@ -3276,3 +3276,116 @@ engineLayer("OrchestrationProjectionPipeline via engine dispatch", (it) => {
     }),
   );
 });
+
+it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-classification-")))(
+  "OrchestrationProjectionPipeline",
+  (it) => {
+    it.effect("projects thread classification from created and meta-updated events", () =>
+      Effect.gen(function* () {
+        const projectionPipeline = yield* OrchestrationProjectionPipeline;
+        const eventStore = yield* OrchestrationEventStore;
+        const sql = yield* SqlClient.SqlClient;
+        const now = "2026-01-01T00:00:00.000Z";
+
+        yield* eventStore.append({
+          type: "project.created",
+          eventId: EventId.make("evt-classify-1"),
+          aggregateKind: "project",
+          aggregateId: ProjectId.make("project-classify"),
+          occurredAt: now,
+          commandId: CommandId.make("cmd-classify-1"),
+          causationEventId: null,
+          correlationId: CommandId.make("cmd-classify-1"),
+          metadata: {},
+          payload: {
+            projectId: ProjectId.make("project-classify"),
+            title: "Classify",
+            workspaceRoot: "/tmp/project-classify",
+            defaultModelSelection: null,
+            scripts: [],
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+        yield* eventStore.append({
+          type: "thread.created",
+          eventId: EventId.make("evt-classify-2"),
+          aggregateKind: "thread",
+          aggregateId: ThreadId.make("thread-classify"),
+          occurredAt: now,
+          commandId: CommandId.make("cmd-classify-2"),
+          causationEventId: null,
+          correlationId: CommandId.make("cmd-classify-2"),
+          metadata: {},
+          payload: {
+            threadId: ThreadId.make("thread-classify"),
+            projectId: ProjectId.make("project-classify"),
+            title: "Classified thread",
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("codex"),
+              model: "gpt-5-codex",
+            },
+            runtimeMode: "full-access",
+            branch: null,
+            worktreePath: null,
+            workType: "feature",
+            stage: "triage",
+            createdAt: now,
+            updatedAt: now,
+          },
+        });
+        yield* projectionPipeline.bootstrap;
+
+        const readClassification = sql<{
+          readonly workType: string | null;
+          readonly stage: string | null;
+        }>`
+          SELECT work_type AS "workType", stage
+          FROM projection_threads
+          WHERE thread_id = 'thread-classify'
+        `;
+        assert.deepEqual(yield* readClassification, [{ workType: "feature", stage: "triage" }]);
+
+        // A partial meta update moves the stage and leaves workType alone.
+        yield* eventStore.append({
+          type: "thread.meta-updated",
+          eventId: EventId.make("evt-classify-3"),
+          aggregateKind: "thread",
+          aggregateId: ThreadId.make("thread-classify"),
+          occurredAt: "2026-01-01T00:00:01.000Z",
+          commandId: CommandId.make("cmd-classify-3"),
+          causationEventId: null,
+          correlationId: CommandId.make("cmd-classify-3"),
+          metadata: {},
+          payload: {
+            threadId: ThreadId.make("thread-classify"),
+            stage: "in-review",
+            updatedAt: "2026-01-01T00:00:01.000Z",
+          },
+        });
+        yield* projectionPipeline.bootstrap;
+        assert.deepEqual(yield* readClassification, [{ workType: "feature", stage: "in-review" }]);
+
+        // An explicit null clears the field back to SQL NULL.
+        yield* eventStore.append({
+          type: "thread.meta-updated",
+          eventId: EventId.make("evt-classify-4"),
+          aggregateKind: "thread",
+          aggregateId: ThreadId.make("thread-classify"),
+          occurredAt: "2026-01-01T00:00:02.000Z",
+          commandId: CommandId.make("cmd-classify-4"),
+          causationEventId: null,
+          correlationId: CommandId.make("cmd-classify-4"),
+          metadata: {},
+          payload: {
+            threadId: ThreadId.make("thread-classify"),
+            workType: null,
+            updatedAt: "2026-01-01T00:00:02.000Z",
+          },
+        });
+        yield* projectionPipeline.bootstrap;
+        assert.deepEqual(yield* readClassification, [{ workType: null, stage: "in-review" }]);
+      }),
+    );
+  },
+);

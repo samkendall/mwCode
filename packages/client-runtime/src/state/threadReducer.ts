@@ -95,6 +95,8 @@ export function applyThreadDetailEvent(
           unsettledAt: null,
           snoozedUntil: null,
           snoozedAt: null,
+          workType: event.payload.workType ?? null,
+          stage: event.payload.stage ?? null,
           deletedAt: null,
           messages: [],
           proposedPlans: [],
@@ -229,6 +231,8 @@ export function applyThreadDetailEvent(
           ...(event.payload.linkedPullRequest !== undefined
             ? { linkedPullRequest: event.payload.linkedPullRequest }
             : {}),
+          ...(event.payload.workType !== undefined ? { workType: event.payload.workType } : {}),
+          ...(event.payload.stage !== undefined ? { stage: event.payload.stage } : {}),
           updatedAt: event.payload.updatedAt,
         },
       };

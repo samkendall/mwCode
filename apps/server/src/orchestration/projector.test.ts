@@ -94,6 +94,8 @@ describe("orchestration projector", () => {
         unsettledAt: null,
         snoozedUntil: null,
         snoozedAt: null,
+        workType: null,
+        stage: null,
         deletedAt: null,
         messages: [],
         proposedPlans: [],

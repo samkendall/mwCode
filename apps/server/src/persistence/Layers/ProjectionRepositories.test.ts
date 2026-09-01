@@ -257,4 +257,59 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
       assert.strictEqual(Option.getOrNull(cleared)?.linkedPullRequest, null);
     }),
   );
+
+  it.effect("round-trips workType and stage through getById and listByProjectId", () =>
+    Effect.gen(function* () {
+      const threads = yield* ProjectionThreadRepository;
+
+      yield* threads.upsert({
+        threadId: ThreadId.make("thread-classified"),
+        projectId: ProjectId.make("project-classified"),
+        title: "Classified thread",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5.4",
+        },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        latestTurnId: null,
+        createdAt: "2026-03-24T00:00:00.000Z",
+        updatedAt: "2026-03-24T00:00:00.000Z",
+        archivedAt: null,
+        settledOverride: null,
+        settledAt: null,
+        unsettledAt: null,
+        snoozedUntil: null,
+        snoozedAt: null,
+        pinnedAt: null,
+        workType: "feature",
+        stage: "in-review",
+        latestUserMessageAt: null,
+        pendingApprovalCount: 0,
+        pendingUserInputCount: 0,
+        hasActionableProposedPlan: 0,
+        deletedAt: null,
+      });
+
+      const persisted = yield* threads.getById({ threadId: ThreadId.make("thread-classified") });
+      const row = Option.getOrNull(persisted);
+      if (row === null) return yield* Effect.die("Expected classified thread row to exist.");
+      assert.strictEqual(row.workType, "feature");
+      assert.strictEqual(row.stage, "in-review");
+
+      const listed = yield* threads.listByProjectId({
+        projectId: ProjectId.make("project-classified"),
+      });
+      assert.strictEqual(listed[0]?.workType, "feature");
+      assert.strictEqual(listed[0]?.stage, "in-review");
+
+      // The upsert must also carry clears back to SQL NULL.
+      yield* threads.upsert({ ...row, workType: null, stage: null });
+      const cleared = yield* threads.getById({ threadId: ThreadId.make("thread-classified") });
+      assert.strictEqual(Option.getOrNull(cleared)?.workType, null);
+      assert.strictEqual(Option.getOrNull(cleared)?.stage, null);
+    }),
+  );
 });

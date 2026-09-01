@@ -377,6 +377,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           interactionMode: command.interactionMode,
           branch: command.branch,
           worktreePath: command.worktreePath,
+          ...(command.workType !== undefined ? { workType: command.workType } : {}),
+          ...(command.stage !== undefined ? { stage: command.stage } : {}),
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
         },
@@ -850,6 +852,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ...(command.linkedPullRequest !== undefined
             ? { linkedPullRequest: command.linkedPullRequest }
             : {}),
+          ...(command.workType !== undefined ? { workType: command.workType } : {}),
+          ...(command.stage !== undefined ? { stage: command.stage } : {}),
           updatedAt: occurredAt,
         },
       };

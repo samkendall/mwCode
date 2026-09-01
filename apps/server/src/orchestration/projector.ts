@@ -306,6 +306,8 @@ export function projectEvent(
             unsettledAt: null,
             snoozedUntil: null,
             snoozedAt: null,
+            workType: payload.workType ?? null,
+            stage: payload.stage ?? null,
             deletedAt: null,
             messages: [],
             activities: [],
@@ -471,6 +473,8 @@ export function projectEvent(
             ...(payload.linkedPullRequest !== undefined
               ? { linkedPullRequest: payload.linkedPullRequest }
               : {}),
+            ...(payload.workType !== undefined ? { workType: payload.workType } : {}),
+            ...(payload.stage !== undefined ? { stage: payload.stage } : {}),
             updatedAt: payload.updatedAt,
           }),
         })),

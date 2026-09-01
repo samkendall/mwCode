@@ -350,6 +350,69 @@ describe("applyThreadDetailEvent", () => {
         expect(cleared.thread.linkedPullRequest).toBeNull();
       }
     });
+
+    it("sets, partially updates, and clears workType and stage", () => {
+      const classified = applyThreadDetailEvent(baseThread, {
+        ...baseEventFields,
+        sequence: 5,
+        occurredAt: "2026-04-01T05:00:00.000Z",
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        type: "thread.meta-updated",
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          workType: "feature",
+          stage: "triage",
+          updatedAt: "2026-04-01T05:00:00.000Z",
+        },
+      });
+
+      expect(classified.kind).toBe("updated");
+      if (classified.kind !== "updated") return;
+      expect(classified.thread.workType).toBe("feature");
+      expect(classified.thread.stage).toBe("triage");
+
+      // Omitted fields must survive a partial update.
+      const advanced = applyThreadDetailEvent(classified.thread, {
+        ...baseEventFields,
+        sequence: 6,
+        occurredAt: "2026-04-01T06:00:00.000Z",
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        type: "thread.meta-updated",
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          stage: "in-review",
+          updatedAt: "2026-04-01T06:00:00.000Z",
+        },
+      });
+
+      expect(advanced.kind).toBe("updated");
+      if (advanced.kind !== "updated") return;
+      expect(advanced.thread.workType).toBe("feature");
+      expect(advanced.thread.stage).toBe("in-review");
+
+      const cleared = applyThreadDetailEvent(advanced.thread, {
+        ...baseEventFields,
+        sequence: 7,
+        occurredAt: "2026-04-01T07:00:00.000Z",
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        type: "thread.meta-updated",
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          workType: null,
+          stage: null,
+          updatedAt: "2026-04-01T07:00:00.000Z",
+        },
+      });
+
+      expect(cleared.kind).toBe("updated");
+      if (cleared.kind === "updated") {
+        expect(cleared.thread.workType).toBeNull();
+        expect(cleared.thread.stage).toBeNull();
+      }
+    });
   });
 
   describe("thread.message-sent", () => {
