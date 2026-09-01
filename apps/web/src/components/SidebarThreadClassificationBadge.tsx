@@ -6,36 +6,29 @@ import type { HarnessTaxonomy, HarnessTaxonomyEntry } from "@t3tools/contracts";
 import { cn } from "../lib/utils";
 import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
 import { resolveClassificationBadge } from "./Sidebar.logic";
+import { StageProgress } from "./StageProgress";
 
 export type ClassificationDimension = "workType" | "stage";
 
-// A taxonomy color is a bare hex string; the chip only ever tints (dot solid,
-// bg/border faint) so an arbitrary config color can't blow out the row or fail
-// contrast — the label text stays on the neutral secondary-label color and
-// reads in both themes.
-function tintStyle(color: string | null): CSSProperties | undefined {
-  if (color === null) return undefined;
-  return {
-    backgroundColor: `color-mix(in srgb, ${color} 14%, transparent)`,
-    borderColor: `color-mix(in srgb, ${color} 32%, transparent)`,
-  };
-}
-
 const CHIP_CLASS =
-  "inline-flex max-w-[7.5rem] shrink-0 cursor-pointer items-center gap-1 rounded-full border px-1.5 py-px text-[10px] font-medium leading-tight text-secondary-label transition-colors outline-none hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring";
+  "inline-flex max-w-[8rem] shrink-0 cursor-pointer items-center gap-1 rounded-sm text-xs leading-tight text-secondary-label transition-colors outline-none hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring";
 
 /**
- * One classification chip (work type or stage). Renders nothing when the
- * thread has no value for the dimension — the sidebar never shows empty chips.
- * Clicking opens a popover of the taxonomy options plus Clear; selecting
- * dispatches through `onSelect` (null clears). Row click/selection is guarded
- * by stopping propagation on the trigger and every option.
+ * One classification control (work type or stage). Renders nothing when the
+ * thread has no value for the dimension — the sidebar never shows empty
+ * controls. The work-type dimension reads as a color dot + word; the stage
+ * dimension reads as a progress pipeline (one dot per stage) + word. Clicking
+ * opens a popover of the taxonomy options plus Clear; selecting dispatches
+ * through `onSelect` (null clears). Row click/selection is guarded by stopping
+ * propagation on the trigger and every option.
  */
 const ClassificationChip = memo(function ClassificationChip(props: {
   entries: readonly HarnessTaxonomyEntry[];
   value: string | null | undefined;
   dimension: ClassificationDimension;
   dimensionLabel: string;
+  // Stage renders the progress pipeline; work type renders a single dot.
+  variant: "dot" | "pipeline";
   // Stage only: true when the user pinned the stage by hand, so the server's
   // per-turn re-assessment leaves it alone. Drives the lock glyph and the
   // "Resume auto" menu item. workType never locks.
@@ -59,19 +52,22 @@ const ClassificationChip = memo(function ClassificationChip(props: {
             aria-label={`${props.dimensionLabel}: ${badge.label}${locked ? " (locked)" : ""}. Change ${props.dimensionLabel.toLowerCase()}`}
             onClick={(event) => event.stopPropagation()}
             onDoubleClick={(event) => event.stopPropagation()}
-            className={cn(CHIP_CLASS, badge.color === null && "border-border/60 bg-muted/40")}
-            style={tintStyle(badge.color)}
+            className={CHIP_CLASS}
           />
         }
       >
-        <span
-          aria-hidden
-          className={cn(
-            "size-1.5 shrink-0 rounded-full",
-            badge.color === null && "bg-muted-foreground/50",
-          )}
-          style={dotStyle}
-        />
+        {props.variant === "pipeline" ? (
+          <StageProgress stage={props.value} stages={props.entries} />
+        ) : (
+          <span
+            aria-hidden
+            className={cn(
+              "size-1.5 shrink-0 rounded-full",
+              badge.color === null && "bg-muted-foreground/50",
+            )}
+            style={dotStyle}
+          />
+        )}
         <span className="truncate">{badge.label}</span>
         {locked ? (
           <LockIcon aria-hidden className="size-2.5 shrink-0 text-muted-foreground/70" />
@@ -142,10 +138,11 @@ const ClassificationChip = memo(function ClassificationChip(props: {
 });
 
 /**
- * Work-type and stage chips for a sidebar thread row. Comfortable card rows
- * show both dimensions; compact one-line rows show work type only (stage is
- * dropped for horizontal room — the card is where the full classification
- * lives). Renders nothing when the thread carries neither field.
+ * Work-type dot and stage pipeline for a sidebar thread row. Comfortable and
+ * cozy rows show both dimensions; compact one-line rows show the work-type dot
+ * only (the stage pipeline is dropped for horizontal room — the fuller rows are
+ * where the lifecycle lives). Renders nothing when the thread carries neither
+ * field.
  */
 export const SidebarThreadClassificationBadges = memo(
   function SidebarThreadClassificationBadges(props: {
@@ -166,6 +163,7 @@ export const SidebarThreadClassificationBadges = memo(
           value={props.workType}
           dimension="workType"
           dimensionLabel="Work type"
+          variant="dot"
           onSelect={props.onSelect}
         />
         {props.compact ? null : (
@@ -174,6 +172,7 @@ export const SidebarThreadClassificationBadges = memo(
             value={props.stage}
             dimension="stage"
             dimensionLabel="Stage"
+            variant="pipeline"
             locked={props.stageManual === true}
             onResumeAuto={props.onResumeStageAuto}
             onSelect={props.onSelect}

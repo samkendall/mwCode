@@ -791,6 +791,44 @@ export function resolveClassificationBadge(
   return { id: trimmed, label: trimmed, color: null, known: false };
 }
 
+/**
+ * The stage pipeline's fill boundary: the index of the thread's current stage
+ * within the taxonomy's `stages` order, so every dot at or before it renders
+ * filled and every dot after it renders hollow. Returns -1 when the thread has
+ * no stage, or carries one the taxonomy no longer lists — an all-hollow
+ * pipeline, since an orphaned id has no position in the current lifecycle.
+ * Trims like resolveClassificationBadge so a padded stored value still matches.
+ */
+export function resolveStageFillIndex(
+  stages: readonly TaxonomyEntryLike[],
+  value: string | null | undefined,
+): number {
+  if (value == null) return -1;
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return -1;
+  return stages.findIndex((entry) => entry.id === trimmed);
+}
+
+/**
+ * Whether a thread's branch is the repo's default and so not worth surfacing in
+ * the row (the row already de-dupes identity that reads elsewhere). Prefers a
+ * trustworthy live signal — `isDefaultRef`, passed only when the checked-out
+ * ref is actually this thread's branch — and otherwise falls back to the
+ * near-universal default-branch names. An empty/absent branch is not a default
+ * branch (there is simply nothing to show); the caller's own presence check
+ * handles that case.
+ */
+export function isDefaultThreadBranch(
+  branch: string | null | undefined,
+  isDefaultRef?: boolean | null | undefined,
+): boolean {
+  const trimmed = branch?.trim();
+  if (!trimmed) return false;
+  if (isDefaultRef === true) return true;
+  const lower = trimmed.toLowerCase();
+  return lower === "main" || lower === "master";
+}
+
 export interface SidebarTaxonomyThreadGroup<TThread> {
   /** Taxonomy id, raw unknown id, or SIDEBAR_UNCLASSIFIED_GROUP_KEY. */
   readonly key: string;

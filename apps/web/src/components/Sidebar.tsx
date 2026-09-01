@@ -135,6 +135,7 @@ import {
   formatWorkingDurationLabel,
   firstValidTimestampMs,
   hasUnseenCompletion,
+  isDefaultThreadBranch,
   isSidebarNestedLinkClick,
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
@@ -1115,6 +1116,18 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     activeThreadBranch: thread.branch,
     currentGitBranch: gitStatus.data?.refName ?? null,
   });
+  // A branch label that just repeats the repo's default ("main"/"master") adds
+  // nothing, so the row drops it and keeps the space for a real, non-default
+  // branch — the signal worth surfacing. `isDefaultRef` is only trusted when the
+  // checked-out ref IS this thread's branch (always true for a worktree; for a
+  // local thread only when there's no checkout mismatch), otherwise the name
+  // fallback decides.
+  const branchIsDefaultRef =
+    gitStatus.data?.refName != null &&
+    gitStatus.data.refName === thread.branch &&
+    gitStatus.data.isDefaultRef === true;
+  const showBranch =
+    thread.branch != null && !isDefaultThreadBranch(thread.branch, branchIsDefaultRef);
   const prProvider = resolveDisplayedThreadPrProvider({
     threadBranch: thread.branch,
     gitStatus: gitStatus.data,
@@ -1160,7 +1173,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
 
   const modelInstanceId = thread.session?.providerInstanceId ?? thread.modelSelection.instanceId;
   const providerEntry = props.providerEntryByInstanceId.get(modelInstanceId) ?? null;
-  const driverKind = providerEntry?.driverKind ?? null;
   const showInstanceBadge =
     providerEntry !== null &&
     shouldShowInstanceBadge(providerEntry, props.providerEntryByInstanceId.values());
@@ -1543,27 +1555,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 Regenerating title
               </span>
             ) : null}
-            {/* Compact rows drop the branch line the card carries, so the
-              provider glyph moves up here — it is the one identity cue that
-              can't be recovered from the title. Settled and snoozed rows are
-              history and keep their leaner layout. */}
-            {variantAction === "settle" && driverKind && modelLabel ? (
+            {/* Compact rows drop the branch line the card carries, so the model
+              name (which carries the provider) moves up here as the one identity
+              cue the title can't recover. The avatar glyph that used to sit
+              beside it was redundant with the name and is gone. */}
+            {variantAction === "settle" && modelLabel ? (
               <span className="min-w-0 shrink truncate text-secondary-label text-xs">
                 {modelLabel}
-              </span>
-            ) : null}
-            {variantAction === "settle" && driverKind ? (
-              <span className="inline-flex shrink-0 items-center">
-                <ProviderInstanceIcon
-                  driverKind={driverKind}
-                  displayName={
-                    providerEntry?.displayName ?? thread.session?.providerName ?? modelInstanceId
-                  }
-                  accentColor={providerEntry?.accentColor}
-                  showBadge={showInstanceBadge}
-                  iconClassName="size-3.5 opacity-60"
-                  badgeClassName="right-[-0.1875rem] bottom-[-0.1875rem] h-3 min-w-3 px-0.5 text-[7px]"
-                />
               </span>
             ) : null}
             {/* The PR badge stays outside the hover-fading slot: it must
@@ -1787,8 +1785,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     </span>
   );
 
-  // The provider glyph + remote marker identity cluster, shared by the card's
-  // meta line and the cozy row's line 2.
+  // The model + remote-marker identity cluster, shared by the card's meta line
+  // and the cozy row's line 2. The provider avatar is gone: the model name now
+  // carries the provider, so a duplicate glyph is just noise. The remote marker
+  // stays — it is orthogonal to the model text.
   const providerIdentityCluster = (
     <>
       {isRemote ? (
@@ -1796,23 +1796,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
           <ServerIcon aria-hidden className="size-3.5" />
         </span>
       ) : null}
-      {driverKind && modelLabel ? (
+      {modelLabel ? (
         <span className="min-w-0 shrink truncate text-secondary-label text-xs">{modelLabel}</span>
-      ) : null}
-      {driverKind ? (
-        <span className="inline-flex shrink-0 items-center">
-          <ProviderInstanceIcon
-            driverKind={driverKind}
-            displayName={
-              providerEntry?.displayName ?? thread.session?.providerName ?? modelInstanceId
-            }
-            accentColor={providerEntry?.accentColor}
-            showBadge={showInstanceBadge}
-            // Glyph dims, badge stays saturated; offset matches the composer trigger.
-            iconClassName="size-3.5 opacity-60"
-            badgeClassName="right-[-0.1875rem] bottom-[-0.1875rem] h-3 min-w-3 px-0.5 text-[7px]"
-          />
-        </span>
       ) : null}
     </>
   );
@@ -1879,9 +1864,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 {pinIndicator}
                 {topLineStatusSlot}
               </div>
-              {/* Line 2: both classification chips + branch on the left; the
-                  relative time (only when the status took line 1's slot), PR
-                  badge, and provider identity on the right. */}
+              {/* Line 2 (metadata): work-type dot + stage pipeline, then a
+                  non-default branch, on the left; model label and the relative
+                  time (only when the status took line 1's slot) on the right. */}
               <div className="flex h-4 min-w-0 items-center gap-1.5 text-secondary-label text-xs">
                 <SidebarThreadClassificationBadges
                   workType={thread.workType}
@@ -1897,7 +1882,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                       {props.projectTitle}
                     </span>
                   ) : null}
-                  {thread.branch ? (
+                  {showBranch ? (
                     <>
                       <ThreadWorktreeIndicator thread={thread} />
                       <span className="min-w-0 shrink truncate">{thread.branch}</span>
@@ -1905,14 +1890,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   ) : null}
                 </span>
                 <span className="ml-auto flex shrink-0 items-center gap-1.5">
+                  {providerIdentityCluster}
+                  {terminalStatusIcon}
+                  {prBadge}
                   {topStatus ? (
                     <span className="tabular-nums text-secondary-label">
                       {threadTimeLabel(thread)}
                     </span>
                   ) : null}
-                  {terminalStatusIcon}
-                  {prBadge}
-                  {providerIdentityCluster}
                 </span>
               </div>
             </div>
@@ -1999,10 +1984,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               ) : null}
             </div>
             <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-secondary-label text-xs">
-              {/* Always the branch. The plan step used to take this slot while
-                  working, but it truncated to a half-sentence and dropped the
-                  branch, so the row lost its most stable identifier. */}
-              {thread.branch ? (
+              {/* The branch, only when it's a real non-default one — a bare
+                  "main"/"master" repeats the repo and just crowds the row. */}
+              {showBranch ? (
                 <>
                   <ThreadWorktreeIndicator thread={thread} />
                   <span className="min-w-0 flex-1 truncate whitespace-nowrap">{thread.branch}</span>
@@ -2026,32 +2010,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   <span className="text-red-600 dark:text-red-400">−{diff.deletions}</span>
                 </span>
               ) : null}
-              <span
-                aria-hidden
-                className="pointer-events-none ml-auto inline-flex shrink-0 items-center gap-1"
-              >
-                {isRemote ? (
-                  <span className="inline-flex shrink-0 items-center text-sidebar-muted-foreground/70">
-                    <ServerIcon aria-hidden className="size-3.5" />
-                  </span>
-                ) : null}
-                {driverKind ? (
-                  <span className="inline-flex shrink-0 items-center">
-                    <ProviderInstanceIcon
-                      driverKind={driverKind}
-                      displayName={
-                        providerEntry?.displayName ??
-                        thread.session?.providerName ??
-                        modelInstanceId
-                      }
-                      accentColor={providerEntry?.accentColor}
-                      showBadge={showInstanceBadge}
-                      // Glyph dims, badge stays saturated; offset matches the composer trigger.
-                      iconClassName="size-3.5 opacity-60"
-                      badgeClassName="right-[-0.1875rem] bottom-[-0.1875rem] h-3 min-w-3 px-0.5 text-[7px]"
-                    />
-                  </span>
-                ) : null}
+              {/* Model name (carrying the provider) + remote marker; the avatar
+                  glyph that used to sit here just repeated the model text. */}
+              <span className="ml-auto inline-flex shrink-0 items-center gap-1.5">
+                {providerIdentityCluster}
               </span>
             </div>
           </div>

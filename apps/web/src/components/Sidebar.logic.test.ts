@@ -8,6 +8,8 @@ import {
   buildSidebarThreadGroups,
   buildSidebarThreadGroupsByTaxonomy,
   resolveClassificationBadge,
+  resolveStageFillIndex,
+  isDefaultThreadBranch,
   SIDEBAR_UNCLASSIFIED_GROUP_KEY,
   createThreadJumpHintVisibilityController,
   filterSidebarProjectScopeItems,
@@ -1217,6 +1219,70 @@ describe("resolveClassificationBadge", () => {
     expect(resolveClassificationBadge(workTypes, undefined)).toBeNull();
     expect(resolveClassificationBadge(workTypes, "")).toBeNull();
     expect(resolveClassificationBadge(workTypes, "   ")).toBeNull();
+  });
+});
+
+describe("resolveStageFillIndex", () => {
+  const stages = [
+    { id: "research", label: "Research", color: "#64748b" },
+    { id: "planning", label: "Planning", color: "#14b8a6" },
+    { id: "building", label: "Building", color: "#22c55e" },
+    { id: "tweaking", label: "Tweaking", color: "#eab308" },
+  ];
+
+  it("returns the current stage's index so every earlier dot fills", () => {
+    expect(resolveStageFillIndex(stages, "building")).toBe(2);
+  });
+
+  it("fills only the first dot for the first stage", () => {
+    expect(resolveStageFillIndex(stages, "research")).toBe(0);
+  });
+
+  it("fills the whole pipeline for the last stage", () => {
+    expect(resolveStageFillIndex(stages, "tweaking")).toBe(stages.length - 1);
+  });
+
+  it("trims a padded stored value before matching", () => {
+    expect(resolveStageFillIndex(stages, "  planning  ")).toBe(1);
+  });
+
+  it("returns -1 (all hollow) for a missing, empty, or unknown stage", () => {
+    expect(resolveStageFillIndex(stages, null)).toBe(-1);
+    expect(resolveStageFillIndex(stages, undefined)).toBe(-1);
+    expect(resolveStageFillIndex(stages, "")).toBe(-1);
+    expect(resolveStageFillIndex(stages, "   ")).toBe(-1);
+    expect(resolveStageFillIndex(stages, "legacy-stage")).toBe(-1);
+  });
+
+  it("returns -1 when the taxonomy has no stages", () => {
+    expect(resolveStageFillIndex([], "building")).toBe(-1);
+  });
+});
+
+describe("isDefaultThreadBranch", () => {
+  it("hides the near-universal default branch names by fallback", () => {
+    expect(isDefaultThreadBranch("main")).toBe(true);
+    expect(isDefaultThreadBranch("master")).toBe(true);
+    expect(isDefaultThreadBranch("MAIN")).toBe(true);
+    expect(isDefaultThreadBranch("  master  ")).toBe(true);
+  });
+
+  it("keeps a real non-default branch", () => {
+    expect(isDefaultThreadBranch("feature/sidebar")).toBe(false);
+    expect(isDefaultThreadBranch("mw")).toBe(false);
+  });
+
+  it("trusts a live isDefaultRef signal over the name", () => {
+    expect(isDefaultThreadBranch("develop", true)).toBe(true);
+    // A false/absent signal falls through to the name check.
+    expect(isDefaultThreadBranch("develop", false)).toBe(false);
+    expect(isDefaultThreadBranch("main", false)).toBe(true);
+  });
+
+  it("treats an empty or absent branch as not-a-default (nothing to show)", () => {
+    expect(isDefaultThreadBranch(null)).toBe(false);
+    expect(isDefaultThreadBranch(undefined)).toBe(false);
+    expect(isDefaultThreadBranch("   ")).toBe(false);
   });
 });
 
