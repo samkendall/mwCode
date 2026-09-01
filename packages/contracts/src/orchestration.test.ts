@@ -852,6 +852,60 @@ it.effect("rejects an explicit title combined with title regeneration", () =>
   }),
 );
 
+it.effect("thread.meta.update accepts non-empty workType/stage and null to clear", () =>
+  Effect.gen(function* () {
+    const set = yield* decodeOrchestrationCommand({
+      type: "thread.meta.update",
+      commandId: "cmd-classify-set",
+      threadId: "thread-1",
+      workType: " feature ",
+      stage: "in-review",
+    });
+    assert.strictEqual(set.type, "thread.meta.update");
+    if (set.type === "thread.meta.update") {
+      // TrimmedNonEmptyString trims at the wire boundary.
+      assert.strictEqual(set.workType, "feature");
+      assert.strictEqual(set.stage, "in-review");
+    }
+
+    const cleared = yield* decodeOrchestrationCommand({
+      type: "thread.meta.update",
+      commandId: "cmd-classify-clear",
+      threadId: "thread-1",
+      workType: null,
+      stage: null,
+    });
+    if (cleared.type === "thread.meta.update") {
+      assert.strictEqual(cleared.workType, null);
+      assert.strictEqual(cleared.stage, null);
+    }
+  }),
+);
+
+it.effect("thread.meta.update rejects empty or whitespace-only workType/stage", () =>
+  Effect.gen(function* () {
+    const emptyWorkType = yield* Effect.exit(
+      decodeOrchestrationCommand({
+        type: "thread.meta.update",
+        commandId: "cmd-classify-empty",
+        threadId: "thread-1",
+        workType: "",
+      }),
+    );
+    assert.strictEqual(emptyWorkType._tag, "Failure");
+
+    const whitespaceStage = yield* Effect.exit(
+      decodeOrchestrationCommand({
+        type: "thread.meta.update",
+        commandId: "cmd-classify-whitespace",
+        threadId: "thread-1",
+        stage: "   ",
+      }),
+    );
+    assert.strictEqual(whitespaceStage._tag, "Failure");
+  }),
+);
+
 it.effect("accepts a source proposed plan reference in thread.turn.start", () =>
   Effect.gen(function* () {
     const parsed = yield* decodeThreadTurnStartCommand({

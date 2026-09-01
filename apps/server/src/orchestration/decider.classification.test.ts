@@ -112,49 +112,4 @@ it.layer(NodeServices.layer)("thread classification decider", (it) => {
       }
     }),
   );
-
-  it.effect("thread.create carries classification onto thread.created", () =>
-    Effect.gen(function* () {
-      const event = yield* decideOrchestrationCommand({
-        command: {
-          type: "thread.create",
-          commandId: CommandId.make("cmd-create"),
-          threadId: ThreadId.make("thread-2"),
-          projectId: ProjectId.make("project-1"),
-          title: "New thread",
-          modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
-          runtimeMode: "full-access",
-          interactionMode: "default",
-          branch: null,
-          worktreePath: null,
-          workType: "chore",
-          stage: "triage",
-          createdAt: NOW,
-        },
-        readModel: {
-          snapshotSequence: 0,
-          projects: [
-            {
-              id: ProjectId.make("project-1"),
-              title: "Project",
-              workspaceRoot: "/tmp/project",
-              defaultModelSelection: null,
-              scripts: [],
-              createdAt: NOW,
-              updatedAt: NOW,
-              deletedAt: null,
-            },
-          ],
-          threads: [],
-          updatedAt: NOW,
-        },
-      });
-      const events = Array.isArray(event) ? event : [event];
-      expect(events[0]?.type).toBe("thread.created");
-      if (events[0]?.type === "thread.created") {
-        expect(events[0].payload.workType).toBe("chore");
-        expect(events[0].payload.stage).toBe("triage");
-      }
-    }),
-  );
 });

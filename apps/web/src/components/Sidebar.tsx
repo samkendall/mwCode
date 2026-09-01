@@ -582,6 +582,14 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
           <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground/90">
             {preview}
           </span>
+          {/* Two drafts with the same fallback favicon are only told apart by
+              their project, so keep a dimmed, capped project label on the row
+              even at compact density. Shrinks before the preview does. */}
+          {props.projectTitle ? (
+            <span className="max-w-[40%] shrink-0 truncate text-xs font-medium text-secondary-label">
+              {props.projectTitle}
+            </span>
+          ) : null}
           {discardButton}
         </div>
       </li>
@@ -3893,6 +3901,11 @@ export default function Sidebar() {
                     thread: EnvironmentThreadShell,
                     section: "pinned" | "active" | "snoozed" | "settled",
                     sortable?: SortablePinnedRowBag,
+                    // Per-group override for grouped active rows: the "Other"
+                    // catch-all group names no project in its header, so its
+                    // rows must keep their own favicon and title. Left
+                    // undefined outside the grouped active loop.
+                    showProjectIdentityOverride?: boolean,
                   ) => {
                     const threadKey = scopedThreadKey(
                       scopeThreadRef(thread.environmentId, thread.id),
@@ -3943,8 +3956,13 @@ export default function Sidebar() {
                         }
                         isPinned={thread.pinnedAt != null}
                         // Grouped active rows sit under a header that already
-                        // names (and shows the favicon for) their project.
-                        showProjectIdentity={activeThreadGroups === null || section !== "active"}
+                        // names (and shows the favicon for) their project — but
+                        // the "Other" group names none, so its rows opt back in
+                        // via the per-group override.
+                        showProjectIdentity={
+                          showProjectIdentityOverride ??
+                          (activeThreadGroups === null || section !== "active")
+                        }
                         sortable={sortable}
                         snoozeWakeLabelText={
                           section === "snoozed" && thread.snoozedUntil != null
@@ -4110,8 +4128,14 @@ export default function Sidebar() {
                           </div>
                         </li>,
                       );
+                      // Real project group → header carries identity, rows
+                      // drop it. Null-project "Other" group → header names
+                      // nothing, so rows keep favicon + title.
+                      const showProjectIdentity = group.project === null;
                       for (const thread of group.threads) {
-                        items.push(renderThreadRow(thread, "active"));
+                        items.push(
+                          renderThreadRow(thread, "active", undefined, showProjectIdentity),
+                        );
                       }
                     }
                   }

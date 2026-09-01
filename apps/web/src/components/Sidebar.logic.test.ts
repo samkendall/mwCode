@@ -953,6 +953,33 @@ describe("buildSidebarThreadGroups", () => {
       }),
     ).toEqual([]);
   });
+
+  // The sidebar decides per-group whether rows keep their favicon + project
+  // title: a real project's group header names the project, so its rows drop
+  // identity; the trailing headerless "Other" group names nothing, so its
+  // orphan rows must keep it (two threads from different removed/unresolved
+  // projects would otherwise be indistinguishable). The render threads this
+  // straight off `group.project === null`.
+  it("marks only the headerless catch-all group as keeping row identity", () => {
+    const groups = buildSidebarThreadGroups({
+      projects: [project("known", [["env-1", "project-known"]])],
+      threads: [
+        thread("orphan-a", "env-1", "project-gone-a"),
+        thread("orphan-b", "env-1", "project-gone-b"),
+        thread("known", "env-1", "project-known"),
+      ],
+    });
+
+    expect(
+      groups.map((group) => ({
+        key: group.key,
+        showProjectIdentity: group.project === null,
+      })),
+    ).toEqual([
+      { key: "known", showProjectIdentity: false },
+      { key: SIDEBAR_UNGROUPED_THREADS_KEY, showProjectIdentity: true },
+    ]);
+  });
 });
 
 describe("pinOrderKeyBetween", () => {

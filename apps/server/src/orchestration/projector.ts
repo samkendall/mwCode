@@ -306,8 +306,10 @@ export function projectEvent(
             unsettledAt: null,
             snoozedUntil: null,
             snoozedAt: null,
-            workType: payload.workType ?? null,
-            stage: payload.stage ?? null,
+            // Classification starts null; it is only ever set post-creation via
+            // thread.meta.update (creation carries no classification).
+            workType: null,
+            stage: null,
             deletedAt: null,
             messages: [],
             activities: [],

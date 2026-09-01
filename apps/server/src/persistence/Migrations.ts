@@ -56,9 +56,9 @@ import Migration0040 from "./Migrations/040_ProjectionProjectFaviconPath.ts";
 import Migration0041 from "./Migrations/041_AuthSessionClientConnection.ts";
 import Migration0042 from "./Migrations/042_ProjectionThreadLinkedPullRequest.ts";
 import Migration0043 from "./Migrations/043_ProjectionThreadsUnsettledAt.ts";
-// Fork-local migrations live at 900+ so upstream's sequential slots never
-// collide with ours. Slot ids only need to be increasing, not contiguous.
-import Migration0900 from "./Migrations/900_ProjectionThreadsWorkTypeAndStage.ts";
+// Fork-local migrations run through their OWN Migrator + tracking table and are
+// numbered from 1 in a separate sequence. See forkMigrationEntries below.
+import Migration0001Fork from "./Migrations/fork/001_ProjectionThreadsWorkTypeAndStage.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -114,10 +114,30 @@ export const migrationEntries = [
   [41, "AuthSessionClientConnection", Migration0041],
   [42, "ProjectionThreadLinkedPullRequest", Migration0042],
   [43, "ProjectionThreadsUnsettledAt", Migration0043],
-  [900, "ProjectionThreadsWorkTypeAndStage", Migration0900],
 ] as const;
 
+/**
+ * Fork-local migrations.
+ *
+ * These run through a SEPARATE Migrator with its own tracking table
+ * (`effect_sql_migrations_fork`) and are numbered from 1 in their own sequence.
+ *
+ * WHY the separate table (do NOT fold these back into migrationEntries):
+ * Effect's Migrator skips any migration whose id is <= the highest id already
+ * recorded in its table (see Migrator.ts `currentId <= latestMigrationId`).
+ * If a fork migration shared upstream's `effect_sql_migrations` table with a
+ * high id (e.g. 900), then after any upstream sync every future upstream
+ * migration (044+) would be silently skipped, corrupting the schema. Keeping
+ * fork ids in their own table means the two sequences never see each other.
+ */
+export const forkMigrationEntries = [
+  [1, "ProjectionThreadsWorkTypeAndStage", Migration0001Fork],
+] as const;
+
+export const FORK_MIGRATIONS_TABLE = "effect_sql_migrations_fork";
+
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
+export const forkMigrationManifest = forkMigrationEntries.map(([id, name]) => [id, name] as const);
 
 export const makeMigrationLoader = (throughId?: number) =>
   Migrator.fromRecord(
@@ -128,11 +148,21 @@ export const makeMigrationLoader = (throughId?: number) =>
     ),
   );
 
+export const makeForkMigrationLoader = () =>
+  Migrator.fromRecord(
+    Object.fromEntries(
+      forkMigrationEntries.map(([id, name, migration]) => [`${id}_${name}`, migration]),
+    ),
+  );
+
 /**
- * Migrator run function - no schema dumping needed
- * Uses the base Migrator.make without platform dependencies
+ * Migrator run functions - no schema dumping needed.
+ * Uses the base Migrator.make without platform dependencies.
+ *
+ * `runFork` targets its own table so its ids never interact with upstream's.
  */
 const run = Migrator.make({});
+const runFork = Migrator.make({});
 
 export interface RunMigrationsOptions {
   readonly toMigrationInclusive?: number | undefined;
@@ -141,22 +171,36 @@ export interface RunMigrationsOptions {
 /**
  * Run all pending migrations.
  *
- * Creates the migrations tracking table (effect_sql_migrations) if it doesn't exist,
- * then runs any migrations with ID greater than the latest recorded migration.
+ * Runs upstream migrations against the default `effect_sql_migrations` table,
+ * then fork-local migrations against `effect_sql_migrations_fork`. Each Migrator
+ * creates its tracking table if needed and runs only migrations with an id
+ * greater than the latest recorded in its own table. The two sequences are
+ * independent so a fork migration never shadows a future upstream one.
  *
- * Returns array of [id, name] tuples for migrations that were run.
+ * `toMigrationInclusive` gates only the upstream set (it names an upstream slot,
+ * so applying it to the fork sequence would be meaningless). The fork set always
+ * runs in full, which is safe: its migrations are guarded to be idempotent and
+ * are never expected to interleave with a partial upstream state in practice.
+ *
+ * Returns the combined array of [id, name] tuples for migrations that were run.
  *
  * @returns Effect containing array of executed migrations
  */
 export const runMigrations = Effect.fn("runMigrations")(function* ({
   toMigrationInclusive,
 }: RunMigrationsOptions = {}) {
-  const executedMigrations = yield* run({ loader: makeMigrationLoader(toMigrationInclusive) });
-  const migrations = executedMigrations.map(([id, name]) => `${id}_${name}`);
+  const executedUpstream = yield* run({ loader: makeMigrationLoader(toMigrationInclusive) });
+  const executedFork = yield* runFork({
+    loader: makeForkMigrationLoader(),
+    table: FORK_MIGRATIONS_TABLE,
+  });
+  const upstreamNames = executedUpstream.map(([id, name]) => `${id}_${name}`);
+  const forkNames = executedFork.map(([id, name]) => `fork/${id}_${name}`);
+  const migrations = [...upstreamNames, ...forkNames];
   yield* migrations.length === 0
     ? Effect.logDebug("Database schema is current")
     : Effect.log("Migrations ran successfully").pipe(Effect.annotateLogs({ migrations }));
-  return executedMigrations;
+  return [...executedUpstream, ...executedFork];
 });
 
 /**

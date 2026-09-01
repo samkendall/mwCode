@@ -3328,10 +3328,26 @@ it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-classification-
             runtimeMode: "full-access",
             branch: null,
             worktreePath: null,
-            workType: "feature",
-            stage: "triage",
             createdAt: now,
             updatedAt: now,
+          },
+        });
+        // Classification is never set at creation; it arrives via meta.update.
+        yield* eventStore.append({
+          type: "thread.meta-updated",
+          eventId: EventId.make("evt-classify-2b"),
+          aggregateKind: "thread",
+          aggregateId: ThreadId.make("thread-classify"),
+          occurredAt: "2026-01-01T00:00:00.500Z",
+          commandId: CommandId.make("cmd-classify-2b"),
+          causationEventId: null,
+          correlationId: CommandId.make("cmd-classify-2b"),
+          metadata: {},
+          payload: {
+            threadId: ThreadId.make("thread-classify"),
+            workType: "feature",
+            stage: "triage",
+            updatedAt: "2026-01-01T00:00:00.500Z",
           },
         });
         yield* projectionPipeline.bootstrap;

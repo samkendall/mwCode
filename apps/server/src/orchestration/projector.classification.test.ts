@@ -57,24 +57,37 @@ it.effect("thread.created without classification leaves both fields null", () =>
   }),
 );
 
-it.effect("projects classification through create, update, and clear", () =>
+it.effect("projects classification through set, update, and clear", () =>
   Effect.gen(function* () {
+    // Creation carries no classification; it is only ever set via meta.update.
     const created = yield* projectEvent(
       createEmptyReadModel(NOW),
-      makeEvent({
-        sequence: 1,
-        type: "thread.created",
-        payload: createdPayload({ workType: "feature", stage: "triage" }),
-      }),
+      makeEvent({ sequence: 1, type: "thread.created", payload: createdPayload() }),
     );
-    expect(created.threads[0]?.workType).toBe("feature");
-    expect(created.threads[0]?.stage).toBe("triage");
+    expect(created.threads[0]?.workType ?? null).toBeNull();
+    expect(created.threads[0]?.stage ?? null).toBeNull();
 
-    // A partial update touches only the field it carries.
-    const advanced = yield* projectEvent(
+    const classified = yield* projectEvent(
       created,
       makeEvent({
         sequence: 2,
+        type: "thread.meta-updated",
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          workType: "feature",
+          stage: "triage",
+          updatedAt: NOW,
+        },
+      }),
+    );
+    expect(classified.threads[0]?.workType).toBe("feature");
+    expect(classified.threads[0]?.stage).toBe("triage");
+
+    // A partial update touches only the field it carries.
+    const advanced = yield* projectEvent(
+      classified,
+      makeEvent({
+        sequence: 3,
         type: "thread.meta-updated",
         payload: { threadId: ThreadId.make("thread-1"), stage: "in-review", updatedAt: NOW },
       }),
@@ -86,7 +99,7 @@ it.effect("projects classification through create, update, and clear", () =>
     const cleared = yield* projectEvent(
       advanced,
       makeEvent({
-        sequence: 3,
+        sequence: 4,
         type: "thread.meta-updated",
         payload: { threadId: ThreadId.make("thread-1"), workType: null, updatedAt: NOW },
       }),

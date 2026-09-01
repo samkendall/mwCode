@@ -43,6 +43,10 @@ A single user-to-assistant work cycle inside a thread. It starts with user input
 
 A user-visible log item attached to a thread. In [the contracts][1], activities cover important non-message events like approvals, tool actions, and failures. They are projected into thread state in [projector.ts][4].
 
+#### Work type and stage
+
+Fork-local per-thread classification metadata. `workType` describes the kind of work (for example a feature or a bug) and `stage` describes where it sits in a workflow (for example triage or in-review). Both are optional, nullable strings that are only ever set after the first turn via `thread.meta.update` (never at thread creation), and null clears them. Today they are unconstrained non-empty strings; a runtime-config taxonomy to constrain and label the allowed values is planned but does not exist yet.
+
 ### Orchestration
 
 Orchestration is the server-side domain layer that turns runtime activity into stable app state. The main entry point is [OrchestrationEngine.ts][7], with core logic in [decider.ts][8] and [projector.ts][4].

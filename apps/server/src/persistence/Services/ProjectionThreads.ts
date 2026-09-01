@@ -46,9 +46,11 @@ export const ProjectionThread = Schema.Struct({
   snoozedAt: Schema.NullOr(IsoDateTime),
   pinnedAt: Schema.NullOr(IsoDateTime),
   pinOrderKey: Schema.optional(Schema.NullOr(Schema.String)),
-  // Fork-local classification metadata. Free-form strings validated against a
-  // runtime taxonomy, never by this schema. Optional so rows written before
-  // the columns existed still decode.
+  // Fork-local classification metadata. Unconstrained non-empty strings today
+  // (the wire contract rejects empty/whitespace); a runtime-config taxonomy to
+  // constrain the allowed values is planned but does not exist yet. This
+  // read-side schema stays permissive. Optional so rows written before the
+  // columns existed still decode.
   workType: Schema.optional(Schema.NullOr(Schema.String)),
   stage: Schema.optional(Schema.NullOr(Schema.String)),
   titleRegenerationRequestId: Schema.optional(Schema.NullOr(CommandId)),

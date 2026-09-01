@@ -95,8 +95,9 @@ export function applyThreadDetailEvent(
           unsettledAt: null,
           snoozedUntil: null,
           snoozedAt: null,
-          workType: event.payload.workType ?? null,
-          stage: event.payload.stage ?? null,
+          // Classification starts null; only thread.meta.update sets it.
+          workType: null,
+          stage: null,
           deletedAt: null,
           messages: [],
           proposedPlans: [],

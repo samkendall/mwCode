@@ -646,8 +646,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             snoozedAt: null,
             pinnedAt: null,
             pinOrderKey: null,
-            workType: event.payload.workType ?? null,
-            stage: event.payload.stage ?? null,
+            // Classification starts null; only thread.meta.update sets it.
+            workType: null,
+            stage: null,
             titleRegenerationRequestId: null,
             titleRegenerationStartedAt: null,
             latestUserMessageAt: null,
