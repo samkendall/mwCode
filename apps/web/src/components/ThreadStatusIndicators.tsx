@@ -49,10 +49,8 @@ export type ThreadPr = VcsStatusResult["pr"];
 
 /**
  * The review/merge signals the sidebar reflects on an open PR's badge, distilled from the linked
- * PR detail the row already polls. `reviewDecision` is left `null` here on purpose: the polled
- * `PullRequestDetail` does not carry the rolled-up decision (only the PR list does), so the
- * approved/changes-requested states are wired through the pure helper for the day that field lands
- * but are never sourced from the detail today. See the report notes on plumbing.
+ * PR detail the row already polls — including the host's rolled-up `reviewDecision`, so the
+ * approved/changes-requested/review-required states render from the same detail as the rest.
  */
 export interface PrBadgeReviewSignals {
   readonly isDraft?: boolean;
@@ -191,9 +189,9 @@ export function useLinkedThreadPullRequest(
             },
             signals: {
               isDraft: detail.isDraft,
-              // The rolled-up decision is not on the detail (only the PR list carries it), so it
-              // stays null; the badge falls back to the merge/checks signals that are present.
-              reviewDecision: null,
+              // The host's rolled-up review verdict, absent where it does not summarise reviews or
+              // has none yet — the badge then falls back to the merge/checks signals.
+              reviewDecision: detail.reviewDecision ?? null,
               checksState: rollupPrChecksState(detail.checks),
               mergeability: detail.mergeability,
               autoMergeEnabled: detail.autoMergeEnabled ?? false,

@@ -668,6 +668,13 @@ export const PullRequestDetail = Schema.Struct({
   reviewers: Schema.Array(PullRequestActor),
   labels: Schema.Array(PullRequestLabel),
   checks: Schema.Array(PullRequestCheck),
+  /**
+   * Where the host says the review stands overall, the same rollup a listing row carries. Absent
+   * where the host does not summarise its reviews (every host but GitHub) or has no verdict yet,
+   * which is what a draft nobody has reviewed reports — so silence is "nothing to say", not
+   * "review required".
+   */
+  reviewDecision: Schema.optional(PullRequestReviewDecision),
   mergeCapabilities: PullRequestMergeCapabilities,
   /**
    * Who the host says the reader is, which is the one thing a conversation cannot be read without
