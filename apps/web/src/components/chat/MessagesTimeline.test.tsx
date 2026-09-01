@@ -1618,6 +1618,64 @@ describe("MessagesTimeline", () => {
     expect(markup).not.toContain("Work Log");
   });
 
+  it("keeps failures visible while other subagents are still working", async () => {
+    const { MessagesTimeline } = await import("./MessagesTimeline");
+    const entries = [
+      { id: "agent-running", status: "running", subagentId: "node-running" },
+      { id: "agent-failed", status: "failed", subagentId: "node-failed" },
+    ].map(({ id, status, subagentId }, position) => ({
+      id,
+      kind: "event" as const,
+      createdAt: MESSAGE_CREATED_AT,
+      projectedItem: {
+        position,
+        visibility: "local" as const,
+        sourceThreadId: "thread-1",
+        sourceItemId: id,
+        item: {
+          id,
+          threadId: "thread-1",
+          runId: "run-1",
+          nodeId: subagentId,
+          providerThreadId: "provider-thread-1",
+          providerTurnId: "provider-turn-1",
+          nativeItemRef: null,
+          parentItemId: null,
+          ordinal: position,
+          status,
+          title: subagentId,
+          startedAt: null,
+          completedAt: null,
+          updatedAt: {},
+          type: "subagent" as const,
+          subagentId,
+          origin: "provider_native" as const,
+          driver: "claudeAgent",
+          providerInstanceId: "claudeAgent",
+          childThreadId: null,
+          prompt: null,
+          progress: null,
+          result: null,
+        },
+      },
+    }));
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        onOpenAgents={() => {}}
+        timelineEntries={entries as never}
+      />,
+    );
+
+    expect(markup).toContain("Kicked off 2 agents");
+    expect(markup).toContain("1 working · 1 failed");
+    expect(markup).toContain("text-destructive");
+    expect(markup).toContain(
+      'aria-label="Kicked off 2 agents, 1 working · 1 failed. Open Agents panel"',
+    );
+    expect(markup.match(/data-agent-spawn-cta="true"/gu)).toHaveLength(1);
+  });
+
   it("discloses the full Codex subagent result without projecting child events", async () => {
     const { MessagesTimeline } = await import("./MessagesTimeline");
     const markup = renderToStaticMarkup(

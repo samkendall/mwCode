@@ -1752,12 +1752,14 @@ const AgentSpawnCtaRow = memo(function AgentSpawnCtaRow(props: {
   const live = working > 0;
   const lead = `${live ? "Kicked off" : "Ran"} ${count} agent${count === 1 ? "" : "s"}`;
   const status = live
-    ? `${working} working`
+    ? failed > 0
+      ? `${working} working · ${failed} failed`
+      : `${working} working`
     : failed > 0
       ? `${failed} failed`
       : stopped > 0
         ? `${stopped} stopped`
-        : "✓ completed";
+        : "completed";
 
   return (
     <button
@@ -1771,7 +1773,10 @@ const AgentSpawnCtaRow = memo(function AgentSpawnCtaRow(props: {
       <BotIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
       <span className="min-w-0 truncate font-medium">{lead}</span>
       <span className="ml-auto flex min-w-0 items-center gap-2 font-mono text-[.7rem] text-muted-foreground">
-        <span className="truncate">{status}</span>
+        <span className={cn("truncate", failed > 0 && "text-destructive")}>
+          {!live && failed === 0 && stopped === 0 ? <span aria-hidden="true">✓ </span> : null}
+          {status}
+        </span>
         <span className="shrink-0 text-info-foreground">{live ? "Open Agents ▸" : "View ▸"}</span>
       </span>
     </button>
