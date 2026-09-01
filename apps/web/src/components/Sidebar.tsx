@@ -1771,16 +1771,19 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   taxonomy={props.harnessTaxonomy}
                   onSelect={handleUpdateClassification}
                 />
-                {thread.branch ? (
-                  <>
-                    <ThreadWorktreeIndicator thread={thread} />
-                    <span className="min-w-0 flex-1 truncate whitespace-nowrap">
-                      {thread.branch}
+                <span className="flex min-w-0 flex-1 items-center gap-1.5 truncate whitespace-nowrap">
+                  {props.showProjectIdentity && props.projectTitle ? (
+                    <span className="min-w-0 shrink truncate text-foreground/60">
+                      {props.projectTitle}
                     </span>
-                  </>
-                ) : (
-                  <span className="flex-1" />
-                )}
+                  ) : null}
+                  {thread.branch ? (
+                    <>
+                      <ThreadWorktreeIndicator thread={thread} />
+                      <span className="min-w-0 shrink truncate">{thread.branch}</span>
+                    </>
+                  ) : null}
+                </span>
                 <span className="ml-auto flex shrink-0 items-center gap-1.5">
                   {topStatus ? (
                     <span className="tabular-nums text-secondary-label">

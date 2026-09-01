@@ -194,7 +194,7 @@ const SIDEBAR_SORT_BY_LABELS: Record<SidebarSortBy, string> = {
   default: "Default",
   "needs-input": "Needs my attention",
   "work-type": "Work type",
-  pr: "Has open PR",
+  pr: "Has a PR",
 };
 const SIDEBAR_SORT_BY_OPTIONS: ReadonlyArray<SidebarSortBy> = [
   "default",
@@ -2096,7 +2096,7 @@ export function GeneralSettingsPanel() {
 
         <SettingsRow
           {...searchableSetting("sidebar-sort")}
-          description="Reorder active threads. Default keeps the static order; other modes surface threads needing attention, cluster by work type, or float open pull requests to the top. When grouping is on, sorting applies within each group."
+          description="Reorder active threads. Default keeps the static order; other modes surface threads needing attention, cluster by work type, or float threads with a pull request to the top. When grouping is on, sorting applies within each group."
           resetAction={
             settings.sidebarSortBy !== DEFAULT_UNIFIED_SETTINGS.sidebarSortBy ? (
               <SettingResetButton
