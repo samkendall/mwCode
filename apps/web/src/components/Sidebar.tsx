@@ -1799,6 +1799,23 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       {modelLabel ? (
         <span className="min-w-0 shrink truncate text-secondary-label text-xs">{modelLabel}</span>
       ) : null}
+      {/* The plain provider glyph is redundant with the model label, but when two
+          instances of the same provider are configured the disambiguating badge
+          is the only inline cue that tells their threads apart. */}
+      {showInstanceBadge && providerEntry?.driverKind ? (
+        <span className="inline-flex shrink-0 items-center">
+          <ProviderInstanceIcon
+            driverKind={providerEntry.driverKind}
+            displayName={
+              providerEntry.displayName ?? thread.session?.providerName ?? modelInstanceId
+            }
+            accentColor={providerEntry.accentColor}
+            showBadge
+            iconClassName="size-3.5 opacity-60"
+            badgeClassName="right-[-0.1875rem] bottom-[-0.1875rem] h-3 min-w-3 px-0.5 text-[7px]"
+          />
+        </span>
+      ) : null}
     </>
   );
 
@@ -1882,11 +1899,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                       {props.projectTitle}
                     </span>
                   ) : null}
+                  <ThreadWorktreeIndicator thread={thread} />
                   {showBranch ? (
-                    <>
-                      <ThreadWorktreeIndicator thread={thread} />
-                      <span className="min-w-0 shrink truncate">{thread.branch}</span>
-                    </>
+                    <span className="min-w-0 shrink truncate">{thread.branch}</span>
                   ) : null}
                 </span>
                 <span className="ml-auto flex shrink-0 items-center gap-1.5">
@@ -1986,11 +2001,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-secondary-label text-xs">
               {/* The branch, only when it's a real non-default one — a bare
                   "main"/"master" repeats the repo and just crowds the row. */}
+              <ThreadWorktreeIndicator thread={thread} />
               {showBranch ? (
-                <>
-                  <ThreadWorktreeIndicator thread={thread} />
-                  <span className="min-w-0 flex-1 truncate whitespace-nowrap">{thread.branch}</span>
-                </>
+                <span className="min-w-0 flex-1 truncate whitespace-nowrap">{thread.branch}</span>
               ) : (
                 <span className="flex-1" />
               )}
