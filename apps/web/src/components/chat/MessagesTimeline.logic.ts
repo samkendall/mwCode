@@ -216,7 +216,11 @@ export function collapseSubagentTimelineEntries(entries: ReadonlyArray<TimelineE
   const groupsByKey = new Map<string, GroupBuilder>();
 
   for (const entry of entries) {
-    if (entry.kind !== "event" || entry.projectedItem.item.type !== "subagent") {
+    if (
+      entry.kind !== "event" ||
+      entry.projectedItem.item.type !== "subagent" ||
+      entry.projectedItem.visibility !== "local"
+    ) {
       timelineEntries.push(entry);
       continue;
     }

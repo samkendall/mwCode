@@ -24,6 +24,7 @@ function subagentTimelineEntry(
   runId: string | null,
   status: OrchestrationV2TurnItemStatus,
   subagentId = id,
+  visibility: "local" | "inherited" = "local",
 ): TimelineEntry {
   return {
     id,
@@ -31,7 +32,7 @@ function subagentTimelineEntry(
     createdAt: "2026-08-29T00:00:00Z",
     projectedItem: {
       position: 0,
-      visibility: "local",
+      visibility,
       sourceThreadId: "thread-parent",
       sourceItemId: id,
       item: {
@@ -112,6 +113,24 @@ describe("collapseSubagentTimelineEntries", () => {
 
     expect(result.timelineEntries).toBe(entries);
     expect(result.ctaByItemId.size).toBe(0);
+  });
+
+  it("preserves inherited subagent rows outside the active thread roster", () => {
+    const entries: TimelineEntry[] = [
+      subagentTimelineEntry("agent-local", "run-1", "running"),
+      subagentTimelineEntry("agent-inherited", "run-1", "completed", undefined, "inherited"),
+    ];
+
+    const result = collapseSubagentTimelineEntries(entries);
+
+    expect(result.timelineEntries.map((entry) => entry.id)).toEqual([
+      "agent-local",
+      "agent-inherited",
+    ]);
+    expect(result.ctaByItemId.get("agent-local")).toEqual({
+      agents: [{ id: "agent-local", status: "running" }],
+    });
+    expect(result.ctaByItemId.has("agent-inherited")).toBe(false);
   });
 });
 

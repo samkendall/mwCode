@@ -1607,7 +1607,7 @@ describe("MessagesTimeline", () => {
     );
 
     expect(markup).toContain('data-agent-spawn-cta="true"');
-    expect(markup).toContain('aria-label="Open Agents panel"');
+    expect(markup).toContain('aria-label="Kicked off 1 agent, 1 working. Open Agents panel"');
     expect(markup).toContain("Kicked off 1 agent");
     expect(markup).toContain("1 working");
     expect(markup).toContain("Open Agents");

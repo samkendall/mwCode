@@ -1762,7 +1762,7 @@ const AgentSpawnCtaRow = memo(function AgentSpawnCtaRow(props: {
   return (
     <button
       type="button"
-      aria-label="Open Agents panel"
+      aria-label={`${lead}, ${status}. Open Agents panel`}
       onClick={onOpenAgents}
       data-v2-item-type="subagent"
       data-agent-spawn-cta="true"
