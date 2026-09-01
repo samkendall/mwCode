@@ -4,6 +4,7 @@ import {
   computeStableMessagesTimelineRows,
   computeMessageDurationStart,
   deriveMessagesTimelineRows,
+  type MessagesTimelineRow,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
   shouldPreserveAssistantLineBreaks,
@@ -337,7 +338,7 @@ describe("deriveMessagesTimelineRows", () => {
           },
         },
       ],
-      expandedTurnIds: new Set(["turn-1" as never]),
+      turnFoldOverrides: new Set(["turn-1" as never]),
       isWorking: false,
       activeTurnStartedAt: null,
       turnDiffSummaryByAssistantMessageId: new Map(),
@@ -552,7 +553,7 @@ describe("deriveMessagesTimelineRows", () => {
 
     const expandedRows = deriveMessagesTimelineRows({
       timelineEntries,
-      expandedTurnIds: new Set(["turn-1" as never]),
+      turnFoldOverrides: new Set(["turn-1" as never]),
       isWorking: false,
       activeTurnStartedAt: null,
       turnDiffSummaryByAssistantMessageId: new Map(),
@@ -659,9 +660,9 @@ describe("deriveMessagesTimelineRows", () => {
     const rows = deriveMessagesTimelineRows({
       timelineEntries: settledTurnTimelineEntries,
       transcriptAutoCollapse: "never",
-      // The toggled set holds turns moved off the setting's default, so under
-      // "never" a listed turn is the collapsed one.
-      expandedTurnIds: new Set(["turn-1" as never]),
+      // Overrides hold turns moved off the setting's default, so under "never"
+      // a listed turn is the folded one.
+      turnFoldOverrides: new Set(["turn-1" as never]),
       isWorking: false,
       activeTurnStartedAt: null,
       turnDiffSummaryByAssistantMessageId: new Map(),
@@ -679,6 +680,33 @@ describe("deriveMessagesTimelineRows", () => {
           row.kind === "turn-fold",
       )?.expanded,
     ).toBe(false);
+  });
+
+  it("reads overrides against the setting they were recorded under", () => {
+    const foldExpanded = (
+      transcriptAutoCollapse: "settled-turns" | "never",
+      turnFoldOverrides: ReadonlySet<TurnId>,
+    ) =>
+      deriveMessagesTimelineRows({
+        timelineEntries: settledTurnTimelineEntries,
+        transcriptAutoCollapse,
+        turnFoldOverrides,
+        isWorking: false,
+        activeTurnStartedAt: null,
+        turnDiffSummaryByAssistantMessageId: new Map(),
+        revertTurnCountByUserMessageId: new Map(),
+      }).find(
+        (row): row is Extract<MessagesTimelineRow, { kind: "turn-fold" }> =>
+          row.kind === "turn-fold",
+      )?.expanded;
+
+    const overrides: ReadonlySet<TurnId> = new Set(["turn-1" as never]);
+    // Under the default the override reads as "the user unfolded this turn";
+    // carried into "never" the same entry would invert it, which is why the
+    // component drops its overrides in the render that sees the new setting.
+    expect(foldExpanded("settled-turns", overrides)).toBe(true);
+    expect(foldExpanded("never", overrides)).toBe(false);
+    expect(foldExpanded("never", new Set())).toBe(true);
   });
 
   it("folds all assistant messages before the terminal message", () => {
@@ -1435,7 +1463,7 @@ describe("deriveMessagesTimelineRows", () => {
           },
         },
       ],
-      expandedTurnIds: new Set(["turn-1" as never]),
+      turnFoldOverrides: new Set(["turn-1" as never]),
       isWorking: false,
       activeTurnStartedAt: null,
       turnDiffSummaryByAssistantMessageId: new Map(),

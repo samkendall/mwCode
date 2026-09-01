@@ -524,6 +524,15 @@ function deriveTurnFolds(input: {
   return foldsByAnchorEntryId;
 }
 
+/**
+ * Whether a settled turn's "Worked for ..." row starts unfolded. The single
+ * definition of the `"never"` rule, shared with the component so its
+ * auto-collapse effects sit out under the same condition.
+ */
+export function turnFoldsStartExpanded(setting: TranscriptAutoCollapse | undefined): boolean {
+  return setting === "never";
+}
+
 export function deriveMessagesTimelineRows(input: {
   timelineEntries: ReadonlyArray<TimelineEntry>;
   latestTurn?: TimelineLatestTurn | null;
@@ -533,7 +542,7 @@ export function deriveMessagesTimelineRows(input: {
    * the default, so the "Worked for ..." row folds and unfolds by hand under
    * either setting.
    */
-  expandedTurnIds?: ReadonlySet<TurnId>;
+  turnFoldOverrides?: ReadonlySet<TurnId>;
   transcriptAutoCollapse?: TranscriptAutoCollapse;
   expandedWorkGroupIds?: ReadonlySet<string>;
   isWorking: boolean;
@@ -556,9 +565,9 @@ export function deriveMessagesTimelineRows(input: {
     latestTurn: input.latestTurn ?? null,
     unsettledTurnId,
   });
-  const turnFoldsStartExpanded = input.transcriptAutoCollapse === "never";
+  const startExpanded = turnFoldsStartExpanded(input.transcriptAutoCollapse);
   const isTurnFoldExpanded = (turnId: TurnId) =>
-    (input.expandedTurnIds?.has(turnId) ?? false) !== turnFoldsStartExpanded;
+    (input.turnFoldOverrides?.has(turnId) ?? false) !== startExpanded;
   const collapsedEntryIds = new Set<string>();
   for (const fold of foldsByAnchorEntryId.values()) {
     if (!isTurnFoldExpanded(fold.turnId)) {

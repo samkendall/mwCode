@@ -116,4 +116,22 @@ it.layer(NodeServices.layer)("t3-sqlite-state", (it) => {
       assert.equal(aliasError._tag, "SqliteStateSharedHomeMutationError");
     }),
   );
+
+  it.effect("protects both the fork and the upstream app data directories by default", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const homeDirectory = yield* fs.makeTempDirectoryScoped({ prefix: "t3-sqlite-state-home-" });
+
+      for (const name of [".mwcode", ".t3"]) {
+        const baseDir = path.join(homeDirectory, name);
+        yield* createFixtureDatabase(baseDir);
+        const error = yield* runSqliteState(
+          { operation: "exec", baseDir, sql: "DELETE FROM fixtures" },
+          { homeDirectory },
+        ).pipe(Effect.flip);
+        assert.equal(error._tag, "SqliteStateSharedHomeMutationError");
+      }
+    }),
+  );
 });

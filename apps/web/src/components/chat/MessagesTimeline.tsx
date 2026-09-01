@@ -107,6 +107,7 @@ import {
   resolveTimelineMinimapTopPercent,
   shouldPreserveAssistantLineBreaks,
   toolGroupAction,
+  turnFoldsStartExpanded,
   workEntryIsVisibleInGroup,
   type StableMessagesTimelineRowsState,
   type MessagesTimelineRow,
@@ -315,7 +316,19 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   topFadeEnabled = false,
   loadEarlier = null,
 }: MessagesTimelineProps) {
-  const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(new Set());
+  // Holds the turns folded the other way from what `transcriptAutoCollapse`
+  // makes the default, tagged with the setting they were recorded under.
+  const [turnFoldOverrides, setTurnFoldOverrides] = useState<{
+    setting: TranscriptAutoCollapse;
+    ids: ReadonlySet<TurnId>;
+  }>(() => ({ setting: transcriptAutoCollapse, ids: new Set() }));
+  // The setting is server-synced, so it can change from another client. Drop
+  // the overrides during this render (React restarts before committing) rather
+  // than from an effect, which would paint one frame with every touched turn
+  // inverted and jump the virtualized list.
+  if (turnFoldOverrides.setting !== transcriptAutoCollapse) {
+    setTurnFoldOverrides({ setting: transcriptAutoCollapse, ids: new Set() });
+  }
   const [expandedWorkGroupIds, setExpandedWorkGroupIds] = useState<ReadonlySet<string>>(new Set());
   const [disclosureToggleSettling, setDisclosureToggleSettling] = useState(false);
   const [minimapStripMap] = useState(() => new Map<string, HTMLSpanElement>());
@@ -381,14 +394,14 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   const onToggleTurnFold = useCallback(
     (turnId: TurnId) => {
       suspendEndScrollMaintenanceForDisclosure(`turn-fold:${turnId}`);
-      setExpandedTurnIds((existing) => {
-        const next = new Set(existing);
-        if (next.has(turnId)) {
-          next.delete(turnId);
+      setTurnFoldOverrides((existing) => {
+        const ids = new Set(existing.ids);
+        if (ids.has(turnId)) {
+          ids.delete(turnId);
         } else {
-          next.add(turnId);
+          ids.add(turnId);
         }
-        return next;
+        return { ...existing, ids };
       });
     },
     [suspendEndScrollMaintenanceForDisclosure],
@@ -409,40 +422,38 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     [suspendEndScrollMaintenanceForDisclosure],
   );
 
-  // Toggles are stored relative to the setting's default, so changing the
-  // setting drops them instead of inverting every turn the user touched.
-  useEffect(() => {
-    setExpandedTurnIds((existing) => (existing.size === 0 ? existing : new Set<TurnId>()));
-  }, [transcriptAutoCollapse]);
-
   // An in-session interrupt leaves its turn expanded so the user keeps their
   // place; the next turn (or a reload, since this is local state) folds it.
   // Both moves are auto-collapse behavior, so they sit out when turns are set
-  // to stay expanded — there the set holds manual folds, which must persist.
+  // to stay expanded — there the overrides are manual folds, which must persist.
   const previousLatestTurnRef = useRef(latestTurn);
   useEffect(() => {
     const previous = previousLatestTurnRef.current;
     previousLatestTurnRef.current = latestTurn;
-    if (!latestTurn || previous?.turnId === undefined || transcriptAutoCollapse === "never") {
+    if (
+      !latestTurn ||
+      previous?.turnId === undefined ||
+      turnFoldsStartExpanded(transcriptAutoCollapse)
+    ) {
       return;
     }
     if (latestTurn.turnId === previous.turnId) {
       if (previous.state === "running" && latestTurn.state === "interrupted") {
-        setExpandedTurnIds((existing) => {
-          const next = new Set(existing);
-          next.add(latestTurn.turnId);
-          return next;
+        setTurnFoldOverrides((existing) => {
+          const ids = new Set(existing.ids);
+          ids.add(latestTurn.turnId);
+          return { ...existing, ids };
         });
       }
       return;
     }
-    setExpandedTurnIds((existing) => {
-      if (!existing.has(previous.turnId)) {
+    setTurnFoldOverrides((existing) => {
+      if (!existing.ids.has(previous.turnId)) {
         return existing;
       }
-      const next = new Set(existing);
-      next.delete(previous.turnId);
-      return next;
+      const ids = new Set(existing.ids);
+      ids.delete(previous.turnId);
+      return { ...existing, ids };
     });
   }, [latestTurn, transcriptAutoCollapse]);
 
@@ -452,7 +463,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         timelineEntries,
         latestTurn,
         runningTurnId,
-        expandedTurnIds,
+        turnFoldOverrides: turnFoldOverrides.ids,
         transcriptAutoCollapse,
         expandedWorkGroupIds,
         isWorking,
@@ -464,7 +475,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       timelineEntries,
       latestTurn,
       runningTurnId,
-      expandedTurnIds,
+      turnFoldOverrides.ids,
       transcriptAutoCollapse,
       expandedWorkGroupIds,
       isWorking,

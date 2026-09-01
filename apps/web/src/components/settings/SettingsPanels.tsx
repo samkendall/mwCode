@@ -2076,7 +2076,7 @@ export function GeneralSettingsPanel() {
 
         <SettingsRow
           {...searchableSetting("auto-collapse-finished-turns")}
-          description="Whether a finished turn hides its tool calls and thinking behind the “Worked for …” row. You can fold a turn by hand either way."
+          description="Whether a finished turn tucks its earlier messages and tool activity behind the “Worked for …” row. Tool details stay collapsed behind their own summary line either way, and you can always fold a turn by hand."
           resetAction={
             settings.transcriptAutoCollapse !== DEFAULT_UNIFIED_SETTINGS.transcriptAutoCollapse ? (
               <SettingResetButton

@@ -192,4 +192,22 @@ it.layer(NodeServices.layer)("migrate-dev-db", (it) => {
       assert.equal(error._tag, "MigrateDevDbSharedHomeError");
     }),
   );
+
+  it.effect("refuses both the fork and the upstream app data directories by default", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const homeDirectory = yield* fs.makeTempDirectoryScoped({ prefix: "migrate-dev-db-home-" });
+
+      for (const name of [".mwcode", ".t3"]) {
+        const baseDir = path.join(homeDirectory, name);
+        const source = yield* createFixtureSource(baseDir);
+        const error = yield* runMigrateDevDb(
+          { baseDir, source, projects: 5, threadsPerProject: 10 },
+          { homeDirectory },
+        ).pipe(Effect.flip);
+        assert.equal(error._tag, "MigrateDevDbSharedHomeError");
+      }
+    }),
+  );
 });
