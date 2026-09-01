@@ -152,6 +152,7 @@ import { resolveLocalCheckoutBranchMismatch } from "./BranchToolbar.logic";
 import {
   ThreadWorktreeIndicator,
   nextThreadChangeRequestSnapshot,
+  prBadgePresentation,
   prStatusIndicator,
   resolveDisplayedThreadPr,
   resolveDisplayedThreadPrProvider,
@@ -984,6 +985,17 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     linkedPullRequestStatus,
   });
   const prStatus = prStatusIndicator(pr, prProvider);
+  // The badge shade reflects the review/merge signals already carried by the linked PR's polled
+  // detail (merged, ready-to-merge, checks failing, conflicts, auto-merge). A branch-matched PR
+  // has no detail, so it falls back to the coarse open/closed/merged state. The signals only
+  // apply while the displayed PR is the live linked one — a cached snapshot leaves them undefined
+  // and the badge degrades to state-only coloring.
+  const prBadgeInfo = pr
+    ? prBadgePresentation(
+        pr.state,
+        pr === linkedPullRequestStatus?.pr ? linkedPullRequestStatus.signals : undefined,
+      )
+    : null;
   const settledPrHoverClass = pr ? settledPrHoverColorClass(pr.state) : undefined;
   useEffect(() => {
     const nextSnapshot = nextThreadChangeRequestSnapshot({
@@ -1260,9 +1272,13 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             ? props.isActive
               ? "text-secondary-label"
               : cn("text-secondary-label transition-colors", settledPrHoverClass)
-            : prStatus.colorClass,
+            : (prBadgeInfo?.colorClass ?? prStatus.colorClass),
         )}
-        aria-label={prStatus.tooltip}
+        aria-label={
+          prBadgeInfo
+            ? `${prStatus.tooltipLead.replace(/ - .*$/, ` - ${prBadgeInfo.statusLabel}`)}: ${prStatus.tooltipTitle}`
+            : prStatus.tooltip
+        }
       >
         #{pr.number}
       </a>

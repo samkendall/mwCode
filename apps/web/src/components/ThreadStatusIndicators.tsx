@@ -4,7 +4,15 @@ import {
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
 import { pullRequestDetailToVcsStatus } from "@t3tools/client-runtime/state/pull-requests";
-import type { EnvironmentId, ThreadLinkedPullRequest, VcsStatusResult } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  PullRequestCheck,
+  PullRequestChecksState,
+  PullRequestMergeability,
+  PullRequestReviewDecision,
+  ThreadLinkedPullRequest,
+  VcsStatusResult,
+} from "@t3tools/contracts";
 import { Atom } from "effect/unstable/reactivity";
 import { CloudIcon, FolderGit2Icon, GitPullRequestIcon, TerminalIcon } from "lucide-react";
 import { useMemo } from "react";
@@ -39,9 +47,118 @@ export interface TerminalStatusIndicator {
 
 export type ThreadPr = VcsStatusResult["pr"];
 
+/**
+ * The review/merge signals the sidebar reflects on an open PR's badge, distilled from the linked
+ * PR detail the row already polls. `reviewDecision` is left `null` here on purpose: the polled
+ * `PullRequestDetail` does not carry the rolled-up decision (only the PR list does), so the
+ * approved/changes-requested states are wired through the pure helper for the day that field lands
+ * but are never sourced from the detail today. See the report notes on plumbing.
+ */
+export interface PrBadgeReviewSignals {
+  readonly isDraft?: boolean;
+  readonly reviewDecision?: PullRequestReviewDecision | null;
+  readonly checksState?: PullRequestChecksState | null;
+  readonly mergeability?: PullRequestMergeability | null;
+  readonly autoMergeEnabled?: boolean;
+}
+
 export interface LinkedThreadPullRequestStatus {
   readonly pr: NonNullable<ThreadPr>;
   readonly sourceControlProvider: NonNullable<VcsStatusResult["sourceControlProvider"]>;
+  /** Distilled from the same polled detail — no extra fetch. Absent only for legacy call sites. */
+  readonly signals?: PrBadgeReviewSignals;
+}
+
+/**
+ * The one-glyph rollup of a PR's checks, from the individual checks the detail carries. A single
+ * failing or cancelled run makes the whole PR "failing"; an outstanding run makes it "pending";
+ * everything else (success, skipped, neutral) is "passing". `null` when the PR has no checks at
+ * all, which reads as "nothing to report" rather than a green tick.
+ */
+export function rollupPrChecksState(
+  checks: ReadonlyArray<PullRequestCheck>,
+): PullRequestChecksState | null {
+  if (checks.length === 0) return null;
+  let sawPending = false;
+  for (const check of checks) {
+    if (check.status === "failure" || check.status === "cancelled") return "failing";
+    if (check.status === "pending") sawPending = true;
+  }
+  return sawPending ? "pending" : "passing";
+}
+
+/**
+ * Which shade a PR badge wears. Only "merged"/"closed" are reachable for a branch-matched PR (no
+ * detail); the rest need the linked-PR signals. Ordered by what a reviewer needs to see first:
+ * something blocking beats something ready.
+ */
+export type PrBadgeTone =
+  | "merged"
+  | "closed"
+  | "attention"
+  | "warning"
+  | "ready"
+  | "auto-merge"
+  | "pending"
+  | "draft";
+
+export interface PrBadgePresentation {
+  readonly tone: PrBadgeTone;
+  /** Static text color; no hover/animation, safe for a dense row. */
+  readonly colorClass: string;
+  /** A short status word for the badge's accessible label and tooltip. */
+  readonly statusLabel: string;
+}
+
+const PR_BADGE_COLOR: Record<PrBadgeTone, string> = {
+  merged: "text-violet-600 dark:text-violet-300/90",
+  closed: "text-red-600 dark:text-red-300/90",
+  attention: "text-red-600 dark:text-red-300/90",
+  warning: "text-amber-600 dark:text-amber-300/90",
+  ready: "text-emerald-600 dark:text-emerald-300/90",
+  "auto-merge": "text-indigo-600 dark:text-indigo-300/90",
+  pending: "text-sky-600 dark:text-sky-300/90",
+  draft: "text-muted-foreground",
+};
+
+function prBadge(tone: PrBadgeTone, statusLabel: string): PrBadgePresentation {
+  return { tone, colorClass: PR_BADGE_COLOR[tone], statusLabel };
+}
+
+/**
+ * Maps a PR's state plus (for a linked PR) its review/merge signals to a single badge shade and a
+ * word for the label. The `state` alone is always enough — that is the branch-matched fallback —
+ * and richer `signals` sharpen an open PR into "ready to merge", "changes requested", "checks
+ * failing", and so on so the sidebar shows at a glance what is waiting.
+ */
+export function prBadgePresentation(
+  state: NonNullable<ThreadPr>["state"],
+  signals?: PrBadgeReviewSignals,
+): PrBadgePresentation {
+  if (state === "merged") return prBadge("merged", "Merged");
+  if (state === "closed") return prBadge("closed", "Closed");
+
+  const isDraft = signals?.isDraft ?? false;
+  const reviewDecision = signals?.reviewDecision ?? null;
+  const checksState = signals?.checksState ?? null;
+  const mergeability = signals?.mergeability ?? null;
+  const autoMergeEnabled = signals?.autoMergeEnabled ?? false;
+
+  if (isDraft) return prBadge("draft", "Draft");
+  if (checksState === "failing") return prBadge("attention", "Checks failing");
+  if (reviewDecision === "changes-requested") return prBadge("attention", "Changes requested");
+  if (mergeability === "conflicting") return prBadge("warning", "Merge conflicts");
+  if (reviewDecision === "approved") return prBadge("ready", "Approved");
+  if (
+    mergeability === "mergeable" &&
+    checksState === "passing" &&
+    reviewDecision !== "review-required"
+  ) {
+    return prBadge("ready", "Ready to merge");
+  }
+  if (autoMergeEnabled) return prBadge("auto-merge", "Auto-merge armed");
+  if (reviewDecision === "review-required") return prBadge("pending", "Review required");
+  return prBadge("pending", "Open");
 }
 
 export function useLinkedThreadPullRequest(
@@ -71,6 +188,15 @@ export function useLinkedThreadPullRequest(
               kind: detail.provider,
               name: detail.provider,
               baseUrl: "",
+            },
+            signals: {
+              isDraft: detail.isDraft,
+              // The rolled-up decision is not on the detail (only the PR list carries it), so it
+              // stays null; the badge falls back to the merge/checks signals that are present.
+              reviewDecision: null,
+              checksState: rollupPrChecksState(detail.checks),
+              mergeability: detail.mergeability,
+              autoMergeEnabled: detail.autoMergeEnabled ?? false,
             },
           },
     [detail],

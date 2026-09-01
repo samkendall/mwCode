@@ -5,12 +5,15 @@ import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import { AtomRegistry } from "effect/unstable/reactivity";
 
+import type { PullRequestCheck, PullRequestCheckStatus } from "@t3tools/contracts";
 import {
   nextThreadChangeRequestSnapshot,
+  prBadgePresentation,
   prStatusIndicator,
   resolveDisplayedThreadPr,
   resolveDisplayedThreadPrProvider,
   resolveThreadPr,
+  rollupPrChecksState,
   settledPrHoverColorClass,
   threadChangeRequestSnapshotsAtom,
   type ThreadChangeRequestSnapshot,
@@ -589,6 +592,136 @@ describe("prStatusIndicator", () => {
     expect(prStatusIndicator({ ...closedPr, state: "closed" }, undefined)?.colorClass).toContain(
       "text-red-600",
     );
+  });
+});
+
+describe("rollupPrChecksState", () => {
+  function check(status: PullRequestCheckStatus): PullRequestCheck {
+    return { name: `check-${status}`, status, description: null, url: null };
+  }
+
+  it("reports nothing for a PR with no checks", () => {
+    expect(rollupPrChecksState([])).toBeNull();
+  });
+
+  it("is failing when any check failed or was cancelled", () => {
+    expect(rollupPrChecksState([check("success"), check("failure")])).toBe("failing");
+    expect(rollupPrChecksState([check("success"), check("cancelled")])).toBe("failing");
+  });
+
+  it("is pending when a check is still running and none failed", () => {
+    expect(rollupPrChecksState([check("success"), check("pending")])).toBe("pending");
+  });
+
+  it("failing outranks pending", () => {
+    expect(rollupPrChecksState([check("pending"), check("failure")])).toBe("failing");
+  });
+
+  it("is passing when every check settled without failure", () => {
+    expect(rollupPrChecksState([check("success"), check("skipped"), check("neutral")])).toBe(
+      "passing",
+    );
+  });
+});
+
+describe("prBadgePresentation", () => {
+  it("shows merged and closed from state alone (branch-matched PRs have no signals)", () => {
+    expect(prBadgePresentation("merged")).toMatchObject({ tone: "merged", statusLabel: "Merged" });
+    expect(prBadgePresentation("merged").colorClass).toContain("text-violet-600");
+    expect(prBadgePresentation("closed")).toMatchObject({ tone: "closed", statusLabel: "Closed" });
+    expect(prBadgePresentation("closed").colorClass).toContain("text-red-600");
+  });
+
+  it("keeps a signalless open PR neutral", () => {
+    expect(prBadgePresentation("open")).toMatchObject({ tone: "pending", statusLabel: "Open" });
+    expect(prBadgePresentation("open").colorClass).toContain("text-sky-600");
+  });
+
+  it("marks a draft PR as such", () => {
+    expect(prBadgePresentation("open", { isDraft: true })).toMatchObject({
+      tone: "draft",
+      statusLabel: "Draft",
+    });
+  });
+
+  it("flags failing checks as attention", () => {
+    expect(prBadgePresentation("open", { checksState: "failing" })).toMatchObject({
+      tone: "attention",
+      statusLabel: "Checks failing",
+    });
+    expect(prBadgePresentation("open", { checksState: "failing" }).colorClass).toContain(
+      "text-red-600",
+    );
+  });
+
+  it("flags requested changes as attention", () => {
+    expect(prBadgePresentation("open", { reviewDecision: "changes-requested" })).toMatchObject({
+      tone: "attention",
+      statusLabel: "Changes requested",
+    });
+  });
+
+  it("warns on merge conflicts", () => {
+    expect(prBadgePresentation("open", { mergeability: "conflicting" })).toMatchObject({
+      tone: "warning",
+      statusLabel: "Merge conflicts",
+    });
+    expect(prBadgePresentation("open", { mergeability: "conflicting" }).colorClass).toContain(
+      "text-amber-600",
+    );
+  });
+
+  it("shows approval as ready", () => {
+    expect(prBadgePresentation("open", { reviewDecision: "approved" })).toMatchObject({
+      tone: "ready",
+      statusLabel: "Approved",
+    });
+    expect(prBadgePresentation("open", { reviewDecision: "approved" }).colorClass).toContain(
+      "text-emerald-600",
+    );
+  });
+
+  it("treats a mergeable, green PR as ready to merge", () => {
+    expect(
+      prBadgePresentation("open", { mergeability: "mergeable", checksState: "passing" }),
+    ).toMatchObject({ tone: "ready", statusLabel: "Ready to merge" });
+  });
+
+  it("does not call a review-required PR ready even when green", () => {
+    expect(
+      prBadgePresentation("open", {
+        mergeability: "mergeable",
+        checksState: "passing",
+        reviewDecision: "review-required",
+      }),
+    ).toMatchObject({ tone: "pending", statusLabel: "Review required" });
+  });
+
+  it("surfaces an armed auto-merge", () => {
+    expect(prBadgePresentation("open", { autoMergeEnabled: true })).toMatchObject({
+      tone: "auto-merge",
+      statusLabel: "Auto-merge armed",
+    });
+    expect(prBadgePresentation("open", { autoMergeEnabled: true }).colorClass).toContain(
+      "text-indigo-600",
+    );
+  });
+
+  it("lets a blocking signal win over a ready one", () => {
+    expect(
+      prBadgePresentation("open", {
+        mergeability: "mergeable",
+        checksState: "failing",
+        reviewDecision: "approved",
+      }),
+    ).toMatchObject({ tone: "attention", statusLabel: "Checks failing" });
+    expect(
+      prBadgePresentation("open", {
+        mergeability: "mergeable",
+        checksState: "passing",
+        reviewDecision: "changes-requested",
+      }),
+    ).toMatchObject({ tone: "attention", statusLabel: "Changes requested" });
   });
 });
 
