@@ -1,0 +1,7 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M0 80C0 35.8172 35.8172 0 80 0H944C988.183 0 1024 35.8172 1024 80V944C1024 988.183 988.183 1024 944 1024H80C35.8172 1024 0 988.183 0 944V80Z" fill="black"/>
+  <text x="512" y="512" text-anchor="middle" dominant-baseline="central"
+        font-family="-apple-system, 'Helvetica Neue', Arial, sans-serif"
+        font-weight="800" font-size="440" textLength="820" lengthAdjust="spacingAndGlyphs"
+        letter-spacing="-20" fill="white">MW</text>
+</svg>
