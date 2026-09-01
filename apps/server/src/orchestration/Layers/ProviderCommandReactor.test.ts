@@ -309,6 +309,10 @@ describe("ProviderCommandReactor", () => {
         }),
       ),
     );
+    // Defaults to "no classification"; individual tests override as needed.
+    const classifyThread = vi.fn<TextGenerationShape["classifyThread"]>((_) =>
+      Effect.succeed({ workType: null, stage: null }),
+    );
     const providerSnapshots = [
       {
         instanceId: modelSelection.instanceId,
@@ -424,6 +428,7 @@ describe("ProviderCommandReactor", () => {
         Layer.mock(TextGeneration, {
           generateBranchName,
           generateThreadTitle,
+          classifyThread,
         }),
       ),
       Layer.provideMerge(ServerSettingsService.layerTest()),
@@ -518,6 +523,7 @@ describe("ProviderCommandReactor", () => {
       refreshStatus,
       generateBranchName,
       generateThreadTitle,
+      classifyThread,
       runtimeSessions,
       stateDir,
       drain,
@@ -740,6 +746,148 @@ describe("ProviderCommandReactor", () => {
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
     expect(thread?.title).toBe("Generated title");
     expect(attempts).toBe(2);
+  });
+
+  describe("thread classification", () => {
+    const now = "2026-01-01T00:00:00.000Z";
+    let turnCounter = 0;
+    const startFirstTurn = async (
+      harness: Awaited<ReturnType<typeof createHarness>>,
+      text: string,
+      options?: { readonly autoClassifyThreads?: boolean },
+    ) => {
+      turnCounter += 1;
+      await harness.runEffect(
+        harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.make(`cmd-turn-start-classify-${turnCounter}`),
+          threadId: ThreadId.make("thread-1"),
+          message: {
+            messageId: asMessageId(`user-msg-classify-${turnCounter}`),
+            role: "user",
+            text,
+            attachments: [],
+          },
+          ...(options?.autoClassifyThreads !== undefined
+            ? { autoClassifyThreads: options.autoClassifyThreads }
+            : {}),
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          createdAt: now,
+        }),
+      );
+    };
+    const threadMeta = async (harness: Awaited<ReturnType<typeof createHarness>>) => {
+      const readModel = await harness.readModel();
+      return readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+    };
+
+    it("fills workType and stage from a valid model classification", async () => {
+      const harness = await createHarness();
+      harness.classifyThread.mockReturnValue(
+        Effect.succeed({ workType: "bug", stage: "building" }),
+      );
+
+      await startFirstTurn(harness, "The reconnect loop crashes after restart.");
+
+      await waitFor(() => harness.classifyThread.mock.calls.length === 1);
+      await waitFor(async () => {
+        const thread = await threadMeta(harness);
+        return thread?.workType === "bug" && thread?.stage === "building";
+      });
+      // Model was asked to decide the work type (no explicit tier in prompt).
+      expect(harness.classifyThread.mock.calls[0]?.[0].includeWorkType).toBe(true);
+    });
+
+    it("drops a hallucinated id and keeps only the valid field", async () => {
+      const harness = await createHarness();
+      harness.classifyThread.mockReturnValue(
+        Effect.succeed({ workType: "not-a-real-type", stage: "building" }),
+      );
+
+      await startFirstTurn(harness, "Investigate the flaky feed test.");
+
+      await waitFor(async () => (await threadMeta(harness))?.stage === "building");
+      const thread = await threadMeta(harness);
+      expect(thread?.stage).toBe("building");
+      // The invalid work type was never persisted.
+      expect(thread?.workType ?? null).toBeNull();
+    });
+
+    it("resolves an explicit work type from the prompt without asking the model for it", async () => {
+      const harness = await createHarness();
+      harness.classifyThread.mockReturnValue(
+        Effect.succeed({ workType: "bug", stage: "research" }),
+      );
+
+      await startFirstTurn(harness, "/momo feature add a share button to the toolbar");
+
+      await waitFor(() => harness.classifyThread.mock.calls.length === 1);
+      // The parse already resolved the work type, so the model only picks a stage.
+      expect(harness.classifyThread.mock.calls[0]?.[0].includeWorkType).toBe(false);
+      await waitFor(async () => {
+        const thread = await threadMeta(harness);
+        return thread?.workType === "feature" && thread?.stage === "research";
+      });
+    });
+
+    it("does not overwrite an already-set work type", async () => {
+      const harness = await createHarness();
+      await harness.runEffect(
+        harness.engine.dispatch({
+          type: "thread.meta.update",
+          commandId: CommandId.make("cmd-preset-worktype"),
+          threadId: ThreadId.make("thread-1"),
+          workType: "cosmetic",
+        }),
+      );
+      harness.classifyThread.mockReturnValue(
+        Effect.succeed({ workType: "bug", stage: "building" }),
+      );
+
+      await startFirstTurn(harness, "Nudge the toolbar padding.");
+
+      await waitFor(async () => (await threadMeta(harness))?.stage === "building");
+      const thread = await threadMeta(harness);
+      // The manual work type survives; only the empty stage is filled.
+      expect(thread?.workType).toBe("cosmetic");
+      expect(thread?.stage).toBe("building");
+      expect(harness.classifyThread.mock.calls[0]?.[0].includeWorkType).toBe(false);
+    });
+
+    it("does not classify when autoClassifyThreads is disabled", async () => {
+      const harness = await createHarness();
+      harness.classifyThread.mockReturnValue(
+        Effect.succeed({ workType: "bug", stage: "building" }),
+      );
+
+      await startFirstTurn(harness, "The reconnect loop crashes.", {
+        autoClassifyThreads: false,
+      });
+
+      await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+      await harness.drain();
+      expect(harness.classifyThread).not.toHaveBeenCalled();
+      const thread = await threadMeta(harness);
+      expect(thread?.workType ?? null).toBeNull();
+      expect(thread?.stage ?? null).toBeNull();
+    });
+
+    it("completes the turn when classification fails", async () => {
+      const harness = await createHarness();
+      harness.classifyThread.mockReturnValue(
+        Effect.fail(new TextGenerationError({ operation: "classifyThread", detail: "boom" })),
+      );
+
+      await startFirstTurn(harness, "The reconnect loop crashes.");
+
+      // The turn still proceeds despite the classification failure.
+      await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+      await harness.drain();
+      const thread = await threadMeta(harness);
+      expect(thread?.workType ?? null).toBeNull();
+      expect(thread?.stage ?? null).toBeNull();
+    });
   });
 
   it("regenerates a thread title from the current conversation", async () => {

@@ -23,10 +23,12 @@ import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
   buildPrContentPrompt,
+  buildThreadClassificationPrompt,
   buildThreadTitlePrompt,
 } from "./TextGenerationPrompts.ts";
 import {
   normalizeCliError,
+  normalizeClassificationResult,
   sanitizeCommitSubject,
   sanitizePrTitle,
   sanitizeThreadTitle,
@@ -85,7 +87,8 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle",
+      | "generateThreadTitle"
+      | "classifyThread",
     value: unknown,
     detail: string,
   ): Effect.Effect<string, TextGenerationError> =>
@@ -115,7 +118,8 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle";
+      | "generateThreadTitle"
+      | "classifyThread";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
@@ -359,10 +363,33 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
       };
     });
 
+  const classifyThread: TextGeneration.TextGeneration["Service"]["classifyThread"] = Effect.fn(
+    "ClaudeTextGeneration.classifyThread",
+  )(function* (input) {
+    const { prompt, outputSchema } = buildThreadClassificationPrompt({
+      message: input.message,
+      workTypes: input.workTypes,
+      stages: input.stages,
+      includeWorkType: input.includeWorkType,
+      attachments: input.attachments,
+    });
+
+    const generated = yield* runClaudeJson({
+      operation: "classifyThread",
+      cwd: input.cwd,
+      prompt,
+      outputSchemaJson: outputSchema,
+      modelSelection: input.modelSelection,
+    });
+
+    return normalizeClassificationResult(generated);
+  });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    classifyThread,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

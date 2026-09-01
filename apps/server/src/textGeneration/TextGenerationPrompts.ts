@@ -316,3 +316,77 @@ export function buildThreadTitlePrompt(input: ThreadTitlePromptInput) {
 
   return { prompt, outputSchema };
 }
+
+// ---------------------------------------------------------------------------
+// Thread classification (work type + stage)
+// ---------------------------------------------------------------------------
+
+export interface ThreadClassificationPromptOption {
+  id: string;
+  label: string;
+  description?: string | null | undefined;
+}
+
+export interface ThreadClassificationPromptInput {
+  message: string;
+  workTypes: ReadonlyArray<ThreadClassificationPromptOption>;
+  stages: ReadonlyArray<ThreadClassificationPromptOption>;
+  /** When false, only a stage is requested; the work type is context only. */
+  includeWorkType: boolean;
+  attachments?: ReadonlyArray<ChatAttachment> | undefined;
+}
+
+function classificationOptionLine(option: ThreadClassificationPromptOption): string {
+  const hint = option.description?.trim();
+  return hint ? `- ${option.id} (${option.label}): ${hint}` : `- ${option.id} (${option.label})`;
+}
+
+/**
+ * Prompt for classifying a new thread by its first user message. The model
+ * picks the single best-matching id from each allowed list, or an empty string
+ * when nothing fits. Returned ids are validated against the taxonomy by the
+ * caller, so a hallucinated value is dropped rather than persisted.
+ */
+export function buildThreadClassificationPrompt(input: ThreadClassificationPromptInput) {
+  const wantsWorkType = input.includeWorkType && input.workTypes.length > 0;
+  const wantsStage = input.stages.length > 0;
+
+  const attachmentLines = (input.attachments ?? []).map(
+    (attachment) => `- ${attachment.name} (${attachment.mimeType}, ${attachment.sizeBytes} bytes)`,
+  );
+
+  const sections: Array<string> = [
+    "You classify a new coding thread from its first user message.",
+    "Return a JSON object with keys: workType, stage.",
+    "Rules:",
+    "- Choose the single id that best matches from the allowed list for each key.",
+    "- Use the exact id string, never the label.",
+    "- Return an empty string for a key when no option clearly applies.",
+    wantsWorkType
+      ? "- workType is what kind of change the user is asking for."
+      : "- Leave workType as an empty string; it is already known.",
+    wantsStage
+      ? "- stage is where in the lifecycle this thread currently sits."
+      : "- Leave stage as an empty string; no stages are configured.",
+    "- Do not invent ids. Only ids from the lists below are valid.",
+  ];
+
+  if (input.workTypes.length > 0) {
+    sections.push("", "Allowed workType ids:", ...input.workTypes.map(classificationOptionLine));
+  }
+  if (wantsStage) {
+    sections.push("", "Allowed stage ids:", ...input.stages.map(classificationOptionLine));
+  }
+
+  sections.push("", "User message:", limitSection(input.message, 8_000));
+  if (attachmentLines.length > 0) {
+    sections.push("", "Attachment metadata:", limitSection(attachmentLines.join("\n"), 4_000));
+  }
+
+  const outputSchema = Schema.Struct({
+    workType: Schema.String,
+    stage: Schema.String,
+  });
+
+  return { prompt: sections.join("\n"), outputSchema };
+}

@@ -73,6 +73,39 @@ export interface ThreadTitleGenerationResult {
   title: string;
 }
 
+/** One allowed taxonomy option (work type or stage) passed to the classifier. */
+export interface ThreadClassificationOption {
+  id: string;
+  label: string;
+  /** Optional one-line hint describing when the option applies. */
+  description?: string | null | undefined;
+}
+
+export interface ThreadClassificationInput {
+  cwd: string;
+  /** First user message text of the thread. */
+  message: string;
+  /** Allowed work-type options; empty disables work-type classification. */
+  workTypes: ReadonlyArray<ThreadClassificationOption>;
+  /** Allowed stage options; empty disables stage classification. */
+  stages: ReadonlyArray<ThreadClassificationOption>;
+  /**
+   * When false the caller already resolved the work type cheaply, so the model
+   * only needs to choose a stage. The work type is still described for context.
+   */
+  includeWorkType: boolean;
+  attachments?: ReadonlyArray<ChatAttachment> | undefined;
+  /** What model and provider to use for generation. */
+  modelSelection: ModelSelection;
+}
+
+export interface ThreadClassificationResult {
+  /** A taxonomy work-type id, or null when the model declined. Unvalidated. */
+  workType: string | null;
+  /** A taxonomy stage id, or null when the model declined. Unvalidated. */
+  stage: string | null;
+}
+
 export interface TextGenerationService {
   generateCommitMessage(
     input: CommitMessageGenerationInput,
@@ -80,6 +113,7 @@ export interface TextGenerationService {
   generatePrContent(input: PrContentGenerationInput): Promise<PrContentGenerationResult>;
   generateBranchName(input: BranchNameGenerationInput): Promise<BranchNameGenerationResult>;
   generateThreadTitle(input: ThreadTitleGenerationInput): Promise<ThreadTitleGenerationResult>;
+  classifyThread(input: ThreadClassificationInput): Promise<ThreadClassificationResult>;
 }
 
 /**
@@ -113,6 +147,14 @@ export class TextGeneration extends Context.Service<
     readonly generateThreadTitle: (
       input: ThreadTitleGenerationInput,
     ) => Effect.Effect<ThreadTitleGenerationResult, TextGenerationError>;
+
+    /**
+     * Classify a thread's work type and/or stage against a fixed taxonomy.
+     * Returned ids are unvalidated: the caller enforces taxonomy membership.
+     */
+    readonly classifyThread: (
+      input: ThreadClassificationInput,
+    ) => Effect.Effect<ThreadClassificationResult, TextGenerationError>;
   }
 >()("t3/textGeneration/TextGeneration") {}
 
@@ -123,7 +165,8 @@ type TextGenerationOp =
   | "generateCommitMessage"
   | "generatePrContent"
   | "generateBranchName"
-  | "generateThreadTitle";
+  | "generateThreadTitle"
+  | "classifyThread";
 
 const resolveInstance = (
   registry: ProviderInstanceRegistry.ProviderInstanceRegistry["Service"],
@@ -162,6 +205,10 @@ export const makeTextGenerationFromRegistry = (
     generateThreadTitle: (input) =>
       resolveInstance(registry, "generateThreadTitle", input.modelSelection.instanceId).pipe(
         Effect.flatMap((textGeneration) => textGeneration.generateThreadTitle(input)),
+      ),
+    classifyThread: (input) =>
+      resolveInstance(registry, "classifyThread", input.modelSelection.instanceId).pipe(
+        Effect.flatMap((textGeneration) => textGeneration.classifyThread(input)),
       ),
   });
 

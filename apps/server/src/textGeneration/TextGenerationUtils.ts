@@ -63,6 +63,22 @@ export function sanitizeThreadTitle(raw: string): string {
   return `${normalized.slice(0, 47).trimEnd()}...`;
 }
 
+/**
+ * Normalise a raw thread-classification result. Trims each field and maps an
+ * empty or whitespace-only value to null so "no clear match" round-trips as
+ * an absent id. Taxonomy membership is enforced by the caller, not here.
+ */
+export function normalizeClassificationResult(raw: {
+  readonly workType?: string | null | undefined;
+  readonly stage?: string | null | undefined;
+}): { workType: string | null; stage: string | null } {
+  const clean = (value: string | null | undefined): string | null => {
+    const trimmed = value?.trim();
+    return trimmed && trimmed.length > 0 ? trimmed : null;
+  };
+  return { workType: clean(raw.workType), stage: clean(raw.stage) };
+}
+
 /** CLI name to human-readable label, e.g. "codex" → "Codex CLI (`codex`)" */
 function cliLabel(cliName: string): string {
   const capitalized = cliName.charAt(0).toUpperCase() + cliName.slice(1);

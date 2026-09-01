@@ -22,12 +22,16 @@ import * as Equal from "effect/Equal";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
+import { ServerConfig } from "../../config.ts";
+import { loadGlobalHarnessTaxonomy, resolveProjectHarnessTaxonomy } from "../../harnessTaxonomy.ts";
+import { parseExplicitWorkType, resolveTaxonomyId } from "../../harnessClassification.ts";
 import { increment, orchestrationEventsProcessedTotal } from "../../observability/Metrics.ts";
 import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
 import type { ProviderServiceError } from "../../provider/Errors.ts";
@@ -313,6 +317,10 @@ const make = Effect.gen(function* () {
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
   const textGeneration = yield* TextGeneration;
   const serverSettingsService = yield* ServerSettingsService;
+  const serverConfig = yield* ServerConfig;
+  // Path is pulled into the layer's context so the taxonomy loaders below can
+  // resolve config file paths.
+  yield* Path.Path;
   const serverCommandId = (tag: string) =>
     crypto.randomUUIDv4.pipe(Effect.map((uuid) => CommandId.make(`server:${tag}:${uuid}`)));
   const serverEventId = () => crypto.randomUUIDv4.pipe(Effect.map(EventId.make));
@@ -945,6 +953,100 @@ const make = Effect.gen(function* () {
     },
   );
 
+  /**
+   * Auto-classify a thread's workType and stage after its first turn.
+   *
+   * Hybrid strategy: a conservative parse of the first user message resolves an
+   * explicit work type without the model when possible; a single model call
+   * fills whatever the parse left open (and generally the stage). Every id is
+   * validated against the effective taxonomy before it is persisted.
+   *
+   * Overwrite guard: fields are re-read late and only filled when still null,
+   * so a manual classification — or an earlier auto one — is never clobbered.
+   * Stage re-assessment on later turns is intentionally out of scope (first
+   * turn only). Fails soft: any error is logged and the turn continues.
+   */
+  const maybeClassifyThreadForFirstTurn = Effect.fn("maybeClassifyThreadForFirstTurn")(
+    function* (input: {
+      readonly threadId: ThreadId;
+      readonly cwd: string;
+      readonly workspaceRoot: string | null;
+      readonly messageText: string;
+      readonly attachments?: ReadonlyArray<ChatAttachment>;
+    }) {
+      const attachments = input.attachments ?? [];
+      yield* Effect.gen(function* () {
+        // Effective taxonomy: global (baseDir) merged with any per-project
+        // override. A missing/invalid file degrades to defaults, never throws.
+        const global = yield* loadGlobalHarnessTaxonomy(serverConfig.baseDir);
+        const taxonomy = input.workspaceRoot
+          ? yield* resolveProjectHarnessTaxonomy(input.workspaceRoot, global)
+          : global;
+        if (taxonomy.workTypes.length === 0 && taxonomy.stages.length === 0) {
+          return;
+        }
+
+        // Only fill fields that are still unset (the overwrite guard).
+        const thread = yield* resolveThread(input.threadId);
+        if (!thread) return;
+        const needsWorkType = thread.workType == null && taxonomy.workTypes.length > 0;
+        const needsStage = thread.stage == null && taxonomy.stages.length > 0;
+        if (!needsWorkType && !needsStage) return;
+
+        // Cheap parse first: an explicit work type in the prompt overrides the
+        // model and can spare it the work-type decision entirely.
+        const parsedWorkType = needsWorkType
+          ? parseExplicitWorkType(input.messageText, taxonomy)
+          : null;
+
+        // At most one model call per thread, and only when the parse left work
+        // to do (an open work type, or any stage).
+        const needsModel = (needsWorkType && parsedWorkType === null) || needsStage;
+        let modelWorkType: string | null = null;
+        let modelStage: string | null = null;
+        if (needsModel) {
+          const { textGenerationModelSelection: modelSelection } =
+            yield* serverSettingsService.getSettings;
+          const generated = yield* textGeneration.classifyThread({
+            cwd: input.cwd,
+            message: input.messageText,
+            workTypes: taxonomy.workTypes,
+            stages: needsStage ? taxonomy.stages : [],
+            includeWorkType: needsWorkType && parsedWorkType === null,
+            ...(attachments.length > 0 ? { attachments } : {}),
+            modelSelection,
+          });
+          modelWorkType = generated.workType;
+          modelStage = generated.stage;
+        }
+
+        // Validate every candidate id against the taxonomy before persisting;
+        // a hallucinated or stale id is dropped rather than written.
+        const resolvedWorkType = needsWorkType
+          ? (parsedWorkType ?? resolveTaxonomyId(taxonomy.workTypes, modelWorkType))
+          : null;
+        const resolvedStage = needsStage ? resolveTaxonomyId(taxonomy.stages, modelStage) : null;
+        if (resolvedWorkType === null && resolvedStage === null) return;
+
+        yield* orchestrationEngine.dispatch({
+          type: "thread.meta.update",
+          commandId: yield* serverCommandId("thread-classify"),
+          threadId: input.threadId,
+          ...(resolvedWorkType !== null ? { workType: resolvedWorkType } : {}),
+          ...(resolvedStage !== null ? { stage: resolvedStage } : {}),
+        });
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("provider command reactor failed to classify thread", {
+            threadId: input.threadId,
+            cwd: input.cwd,
+            cause: Cause.pretty(cause),
+          }),
+        ),
+      );
+    },
+  );
+
   const regenerateThreadTitle = Effect.fn("regenerateThreadTitle")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.meta-updated" }>,
     requestId: CommandId,
@@ -1170,6 +1272,18 @@ const make = Effect.gen(function* () {
           threadId: event.payload.threadId,
           cwd: generationCwd,
           ...generationInput,
+        }).pipe(Effect.forkScoped);
+      }
+
+      // Auto-classify workType/stage unless the client turned it off. Absent
+      // flag means enabled, matching the `autoClassifyThreads` setting default.
+      if (event.payload.autoClassifyThreads !== false) {
+        yield* maybeClassifyThreadForFirstTurn({
+          threadId: event.payload.threadId,
+          cwd: generationCwd,
+          workspaceRoot: project?.workspaceRoot ?? null,
+          messageText: message.text,
+          ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
         }).pipe(Effect.forkScoped);
       }
     }

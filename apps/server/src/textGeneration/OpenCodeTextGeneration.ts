@@ -18,10 +18,12 @@ import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
   buildPrContentPrompt,
+  buildThreadClassificationPrompt,
   buildThreadTitlePrompt,
 } from "./TextGenerationPrompts.ts";
 import * as TextGeneration from "./TextGeneration.ts";
 import {
+  normalizeClassificationResult,
   sanitizeCommitSubject,
   sanitizePrTitle,
   sanitizeThreadTitle,
@@ -34,6 +36,7 @@ const OpenCodeTextGenerationOperation = Schema.Literals([
   "generatePrContent",
   "generateBranchName",
   "generateThreadTitle",
+  "classifyThread",
 ]);
 
 type OpenCodeTextGenerationOperation = typeof OpenCodeTextGenerationOperation.Type;
@@ -451,10 +454,33 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
       };
     });
 
+  const classifyThread: TextGeneration.TextGeneration["Service"]["classifyThread"] = Effect.fn(
+    "OpenCodeTextGeneration.classifyThread",
+  )(function* (input) {
+    const { prompt, outputSchema } = buildThreadClassificationPrompt({
+      message: input.message,
+      workTypes: input.workTypes,
+      stages: input.stages,
+      includeWorkType: input.includeWorkType,
+      attachments: input.attachments,
+    });
+    const generated = yield* runOpenCodeJson({
+      operation: "classifyThread",
+      cwd: input.cwd,
+      prompt,
+      outputSchemaJson: outputSchema,
+      modelSelection: input.modelSelection,
+      attachments: input.attachments,
+    });
+
+    return normalizeClassificationResult(generated);
+  });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    classifyThread,
   } satisfies TextGeneration.TextGeneration["Service"];
 });

@@ -295,6 +295,11 @@ function createTextGeneration(
       Effect.succeed({
         title: "Update workflow",
       }),
+    classifyThread: () =>
+      Effect.succeed({
+        workType: null,
+        stage: null,
+      }),
     ...overrides,
   };
 
@@ -338,6 +343,17 @@ function createTextGeneration(
           (cause) =>
             new TextGenerationError({
               operation: "generateThreadTitle",
+              detail: "fake text generation failed",
+              ...(cause !== undefined ? { cause } : {}),
+            }),
+        ),
+      ),
+    classifyThread: (input) =>
+      implementation.classifyThread(input).pipe(
+        Effect.mapError(
+          (cause) =>
+            new TextGenerationError({
+              operation: "classifyThread",
               detail: "fake text generation failed",
               ...(cause !== undefined ? { cause } : {}),
             }),
