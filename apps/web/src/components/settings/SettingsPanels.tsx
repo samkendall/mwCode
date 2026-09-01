@@ -159,6 +159,11 @@ const TIMESTAMP_FORMAT_LABELS = {
   "24-hour": "24-hour",
 } as const;
 
+const TRANSCRIPT_AUTO_COLLAPSE_LABELS = {
+  "settled-turns": "When the turn finishes",
+  never: "Never",
+} as const;
+
 const BACKGROUND_ACTIVITY_PROFILE_LABELS: Record<BackgroundActivityProfile, string> = {
   balanced: "Balanced",
   performance: "Performance",
@@ -488,6 +493,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat
         ? ["Time format"]
         : []),
+      ...(settings.transcriptAutoCollapse !== DEFAULT_UNIFIED_SETTINGS.transcriptAutoCollapse
+        ? ["Auto-collapse finished turns"]
+        : []),
       ...(settings.sidebarThreadPreviewCount !== DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount
         ? ["Visible threads"]
         : []),
@@ -583,6 +591,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.sidebarThreadPreviewCount,
       settings.showSkillsInSlashMenu,
       settings.timestampFormat,
+      settings.transcriptAutoCollapse,
       settings.wordWrap,
       followSystem,
       theme,
@@ -655,6 +664,7 @@ export function useSettingsRestore(onRestored?: () => void) {
     updateSettings({
       appearanceContrast: DEFAULT_UNIFIED_SETTINGS.appearanceContrast,
       timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
+      transcriptAutoCollapse: DEFAULT_UNIFIED_SETTINGS.transcriptAutoCollapse,
       wordWrap: DEFAULT_UNIFIED_SETTINGS.wordWrap,
       diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace,
       showSkillsInSlashMenu: DEFAULT_UNIFIED_SETTINGS.showSkillsInSlashMenu,
@@ -2058,6 +2068,47 @@ export function GeneralSettingsPanel() {
                 </SelectItem>
                 <SelectItem hideIndicator value="24-hour">
                   {TIMESTAMP_FORMAT_LABELS["24-hour"]}
+                </SelectItem>
+              </SelectPopup>
+            </Select>
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("auto-collapse-finished-turns")}
+          description="Whether a finished turn hides its tool calls and thinking behind the “Worked for …” row. You can fold a turn by hand either way."
+          resetAction={
+            settings.transcriptAutoCollapse !== DEFAULT_UNIFIED_SETTINGS.transcriptAutoCollapse ? (
+              <SettingResetButton
+                label="auto-collapse finished turns"
+                onClick={() =>
+                  updateSettings({
+                    transcriptAutoCollapse: DEFAULT_UNIFIED_SETTINGS.transcriptAutoCollapse,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={settings.transcriptAutoCollapse}
+              onValueChange={(value) => {
+                if (value === "settled-turns" || value === "never") {
+                  updateSettings({ transcriptAutoCollapse: value });
+                }
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-52" aria-label="Auto-collapse finished turns">
+                <SelectValue>
+                  {TRANSCRIPT_AUTO_COLLAPSE_LABELS[settings.transcriptAutoCollapse]}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="settled-turns">
+                  {TRANSCRIPT_AUTO_COLLAPSE_LABELS["settled-turns"]}
+                </SelectItem>
+                <SelectItem hideIndicator value="never">
+                  {TRANSCRIPT_AUTO_COLLAPSE_LABELS.never}
                 </SelectItem>
               </SelectPopup>
             </Select>

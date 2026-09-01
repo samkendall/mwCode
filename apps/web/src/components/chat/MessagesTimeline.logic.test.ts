@@ -571,6 +571,116 @@ describe("deriveMessagesTimelineRows", () => {
     ).toBeDefined();
   });
 
+  // One settled turn whose first message and work would fold away by default.
+  const settledTurnTimelineEntries = [
+    {
+      id: "user-entry",
+      kind: "message" as const,
+      createdAt: "2026-01-01T00:00:00Z",
+      message: {
+        id: "user-1" as never,
+        role: "user" as const,
+        text: "Build it",
+        turnId: null,
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-01T00:00:00Z",
+        streaming: false,
+      },
+    },
+    {
+      id: "assistant-first-entry",
+      kind: "message" as const,
+      createdAt: "2026-01-01T00:00:05Z",
+      message: {
+        id: "assistant-first" as never,
+        role: "assistant" as const,
+        text: "Checking the deployment.",
+        turnId: "turn-1" as never,
+        createdAt: "2026-01-01T00:00:05Z",
+        updatedAt: "2026-01-01T00:00:06Z",
+        streaming: false,
+      },
+    },
+    {
+      id: "work-entry-1",
+      kind: "work" as const,
+      createdAt: "2026-01-01T00:00:08Z",
+      entry: {
+        id: "work-1",
+        createdAt: "2026-01-01T00:00:08Z",
+        turnId: "turn-1" as never,
+        label: "Ran command",
+        tone: "tool" as const,
+      },
+    },
+    {
+      id: "assistant-final-entry",
+      kind: "message" as const,
+      createdAt: "2026-01-01T00:00:20Z",
+      message: {
+        id: "assistant-final" as never,
+        role: "assistant" as const,
+        text: "Done",
+        turnId: "turn-1" as never,
+        createdAt: "2026-01-01T00:00:20Z",
+        updatedAt: "2026-01-01T00:00:22Z",
+        streaming: false,
+      },
+    },
+  ];
+
+  it("keeps a settled turn's entries visible when auto-collapse is never", () => {
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: settledTurnTimelineEntries,
+      transcriptAutoCollapse: "never",
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    expect(rows.map((row) => row.id)).toEqual([
+      "user-entry",
+      "turn-fold:turn-1",
+      "assistant-first-entry",
+      "work-toggle:work-entry-1",
+      "assistant-final-entry",
+    ]);
+    const foldRow = rows.find(
+      (row): row is Extract<(typeof rows)[number], { kind: "turn-fold" }> =>
+        row.kind === "turn-fold",
+    );
+    // The header stays so the turn is still foldable by hand.
+    expect(foldRow?.label).toBe("Worked for 22s");
+    expect(foldRow?.expanded).toBe(true);
+  });
+
+  it("folds a turn by hand when auto-collapse is never", () => {
+    const rows = deriveMessagesTimelineRows({
+      timelineEntries: settledTurnTimelineEntries,
+      transcriptAutoCollapse: "never",
+      // The toggled set holds turns moved off the setting's default, so under
+      // "never" a listed turn is the collapsed one.
+      expandedTurnIds: new Set(["turn-1" as never]),
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaryByAssistantMessageId: new Map(),
+      revertTurnCountByUserMessageId: new Map(),
+    });
+
+    expect(rows.map((row) => row.id)).toEqual([
+      "user-entry",
+      "turn-fold:turn-1",
+      "assistant-final-entry",
+    ]);
+    expect(
+      rows.find(
+        (row): row is Extract<(typeof rows)[number], { kind: "turn-fold" }> =>
+          row.kind === "turn-fold",
+      )?.expanded,
+    ).toBe(false);
+  });
+
   it("folds all assistant messages before the terminal message", () => {
     const timelineEntries = [
       {

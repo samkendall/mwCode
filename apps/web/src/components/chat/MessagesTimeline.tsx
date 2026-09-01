@@ -129,7 +129,7 @@ import {
 } from "~/lib/previewAnnotation";
 import { cn } from "~/lib/utils";
 import { useUiStateStore } from "~/uiStateStore";
-import { type TimestampFormat } from "@t3tools/contracts/settings";
+import { type TimestampFormat, type TranscriptAutoCollapse } from "@t3tools/contracts/settings";
 import { formatChatTimestampTooltip, formatDayAwareTimestamp } from "../../timestampFormat";
 
 import {
@@ -253,6 +253,7 @@ interface MessagesTimelineProps {
   markdownCwd: string | undefined;
   resolvedTheme: "light" | "dark";
   timestampFormat: TimestampFormat;
+  transcriptAutoCollapse: TranscriptAutoCollapse;
   workspaceRoot: string | undefined;
   skills?: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   anchorMessageId: MessageId | null;
@@ -301,6 +302,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   markdownCwd,
   resolvedTheme,
   timestampFormat,
+  transcriptAutoCollapse,
   workspaceRoot,
   skills = EMPTY_TIMELINE_SKILLS,
   anchorMessageId,
@@ -407,13 +409,21 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     [suspendEndScrollMaintenanceForDisclosure],
   );
 
+  // Toggles are stored relative to the setting's default, so changing the
+  // setting drops them instead of inverting every turn the user touched.
+  useEffect(() => {
+    setExpandedTurnIds((existing) => (existing.size === 0 ? existing : new Set<TurnId>()));
+  }, [transcriptAutoCollapse]);
+
   // An in-session interrupt leaves its turn expanded so the user keeps their
   // place; the next turn (or a reload, since this is local state) folds it.
+  // Both moves are auto-collapse behavior, so they sit out when turns are set
+  // to stay expanded — there the set holds manual folds, which must persist.
   const previousLatestTurnRef = useRef(latestTurn);
   useEffect(() => {
     const previous = previousLatestTurnRef.current;
     previousLatestTurnRef.current = latestTurn;
-    if (!latestTurn || previous?.turnId === undefined) {
+    if (!latestTurn || previous?.turnId === undefined || transcriptAutoCollapse === "never") {
       return;
     }
     if (latestTurn.turnId === previous.turnId) {
@@ -434,7 +444,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       next.delete(previous.turnId);
       return next;
     });
-  }, [latestTurn]);
+  }, [latestTurn, transcriptAutoCollapse]);
 
   const rawRows = useMemo(
     () =>
@@ -443,6 +453,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         latestTurn,
         runningTurnId,
         expandedTurnIds,
+        transcriptAutoCollapse,
         expandedWorkGroupIds,
         isWorking,
         activeTurnStartedAt,
@@ -454,6 +465,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       latestTurn,
       runningTurnId,
       expandedTurnIds,
+      transcriptAutoCollapse,
       expandedWorkGroupIds,
       isWorking,
       activeTurnStartedAt,

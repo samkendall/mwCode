@@ -169,6 +169,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["timestamp clock locale system browser os 12 hour 24 hour"],
   },
   {
+    id: "auto-collapse-finished-turns",
+    title: "Auto-collapse finished turns",
+    to: "/settings/general",
+    searchTerms: ["worked for fold unfold expand transcript thinking tool calls keep open"],
+  },
+  {
     id: "hide-whitespace-changes",
     title: "Hide whitespace changes",
     to: "/settings/general",

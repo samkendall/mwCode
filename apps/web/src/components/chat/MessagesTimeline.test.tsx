@@ -193,6 +193,7 @@ function buildProps() {
     markdownCwd: undefined,
     resolvedTheme: "light" as const,
     timestampFormat: "locale" as const,
+    transcriptAutoCollapse: "settled-turns" as const,
     workspaceRoot: undefined,
     anchorMessageId: null,
     onAnchorReady: () => {},

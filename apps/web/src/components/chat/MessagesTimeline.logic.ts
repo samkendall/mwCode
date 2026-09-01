@@ -21,7 +21,12 @@ import {
   type WorkLogEntry,
 } from "../../session-logic";
 import { type ChatMessage, type ProposedPlan, type TurnDiffSummary } from "../../types";
-import { type MessageId, type OrchestrationLatestTurn, type TurnId } from "@t3tools/contracts";
+import {
+  type MessageId,
+  type OrchestrationLatestTurn,
+  type TranscriptAutoCollapse,
+  type TurnId,
+} from "@t3tools/contracts";
 
 export const TIMELINE_MINIMAP_ITEM_SPACING = 8;
 export const TIMELINE_MINIMAP_MIN_ITEMS = 2;
@@ -523,7 +528,13 @@ export function deriveMessagesTimelineRows(input: {
   timelineEntries: ReadonlyArray<TimelineEntry>;
   latestTurn?: TimelineLatestTurn | null;
   runningTurnId?: TurnId | null;
+  /**
+   * Turns the user toggled away from whatever `transcriptAutoCollapse` makes
+   * the default, so the "Worked for ..." row folds and unfolds by hand under
+   * either setting.
+   */
   expandedTurnIds?: ReadonlySet<TurnId>;
+  transcriptAutoCollapse?: TranscriptAutoCollapse;
   expandedWorkGroupIds?: ReadonlySet<string>;
   isWorking: boolean;
   activeTurnStartedAt: string | null;
@@ -545,9 +556,12 @@ export function deriveMessagesTimelineRows(input: {
     latestTurn: input.latestTurn ?? null,
     unsettledTurnId,
   });
+  const turnFoldsStartExpanded = input.transcriptAutoCollapse === "never";
+  const isTurnFoldExpanded = (turnId: TurnId) =>
+    (input.expandedTurnIds?.has(turnId) ?? false) !== turnFoldsStartExpanded;
   const collapsedEntryIds = new Set<string>();
   for (const fold of foldsByAnchorEntryId.values()) {
-    if (!input.expandedTurnIds?.has(fold.turnId)) {
+    if (!isTurnFoldExpanded(fold.turnId)) {
       for (const entryId of fold.hiddenEntryIds) {
         collapsedEntryIds.add(entryId);
       }
@@ -666,7 +680,7 @@ export function deriveMessagesTimelineRows(input: {
         createdAt: anchoredTurnFold.createdAt,
         turnId: anchoredTurnFold.turnId,
         label: anchoredTurnFold.label,
-        expanded: input.expandedTurnIds?.has(anchoredTurnFold.turnId) ?? false,
+        expanded: isTurnFoldExpanded(anchoredTurnFold.turnId),
       });
     }
 

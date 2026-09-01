@@ -30,6 +30,12 @@ export const TimestampFormat = Schema.Literals(["locale", "12-hour", "24-hour"])
 export type TimestampFormat = typeof TimestampFormat.Type;
 export const DEFAULT_TIMESTAMP_FORMAT: TimestampFormat = "locale";
 
+// Whether a settled turn folds its own work behind the "Worked for ..." row.
+// "never" keeps the transcript expanded; the fold row stays as a manual toggle.
+export const TranscriptAutoCollapse = Schema.Literals(["settled-turns", "never"]);
+export type TranscriptAutoCollapse = typeof TranscriptAutoCollapse.Type;
+export const DEFAULT_TRANSCRIPT_AUTO_COLLAPSE: TranscriptAutoCollapse = "settled-turns";
+
 export const SidebarProjectSortOrder = Schema.Literals(["updated_at", "created_at", "manual"]);
 export type SidebarProjectSortOrder = typeof SidebarProjectSortOrder.Type;
 export const DEFAULT_SIDEBAR_PROJECT_SORT_ORDER: SidebarProjectSortOrder = "updated_at";
@@ -275,6 +281,9 @@ export const ClientSettingsSchema = Schema.Struct({
   ),
   timestampFormat: TimestampFormat.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_TIMESTAMP_FORMAT)),
+  ),
+  transcriptAutoCollapse: TranscriptAutoCollapse.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_TRANSCRIPT_AUTO_COLLAPSE)),
   ),
   wordWrap: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
 });
@@ -986,6 +995,7 @@ export const ClientSettingsPatch = Schema.Struct({
   sidebarThreadSortOrder: Schema.optionalKey(SidebarThreadSortOrder),
   sidebarThreadPreviewCount: Schema.optionalKey(SidebarThreadPreviewCount),
   timestampFormat: Schema.optionalKey(TimestampFormat),
+  transcriptAutoCollapse: Schema.optionalKey(TranscriptAutoCollapse),
   wordWrap: Schema.optionalKey(Schema.Boolean),
 });
 export type ClientSettingsPatch = typeof ClientSettingsPatch.Type;
