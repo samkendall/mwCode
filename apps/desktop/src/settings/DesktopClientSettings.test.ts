@@ -46,6 +46,8 @@ const clientSettings: ClientSettings = {
   sidebarGroupBy: "project",
   autoClassifyThreads: true,
   sidebarSortBy: "needs-input",
+  sidebarProjectSortOverrides: {},
+  sidebarProjectManualOrder: [],
   sidebarProjectGroupingMode: "repository_path",
   sidebarProjectGroupingOverrides: {
     "environment-1:/tmp/project-a": "separate",

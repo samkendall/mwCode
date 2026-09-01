@@ -611,6 +611,78 @@ export function sortActiveThreadsForSidebar<T extends ActiveSortInput>(
   );
 }
 
+/**
+ * Orders logical project groups for the group-by-project sidebar mode by an
+ * explicit, persisted manual order — NOT by activity, so a group never jumps
+ * as its threads work. Projects listed in `manualOrder` come first, in that
+ * order; every project the list doesn't mention sorts AFTER them in a stable,
+ * activity-independent order (alphabetical by display name, projectKey
+ * tiebreak) so a brand-new project lands deterministically instead of leaping
+ * to the top. An empty manual order therefore renders the whole set
+ * alphabetically.
+ */
+export function orderProjectGroupsByManualOrder<
+  TProject extends { readonly projectKey: string; readonly displayName: string },
+>(projects: readonly TProject[], manualOrder: readonly string[]): TProject[] {
+  const orderIndex = new Map(manualOrder.map((key, index) => [key, index] as const));
+  return [...projects].toSorted((left, right) => {
+    const leftIndex = orderIndex.get(left.projectKey);
+    const rightIndex = orderIndex.get(right.projectKey);
+    if (leftIndex !== undefined && rightIndex !== undefined) return leftIndex - rightIndex;
+    if (leftIndex !== undefined) return -1;
+    if (rightIndex !== undefined) return 1;
+    return (
+      left.displayName.localeCompare(right.displayName) ||
+      left.projectKey.localeCompare(right.projectKey)
+    );
+  });
+}
+
+/** Moves `activeKey` to `overKey`'s slot within the on-screen key order,
+    mirroring dnd-kit's arrayMove. Returns a fresh list; a no-op (key missing or
+    already in place) returns a copy of the input so the caller can persist it
+    unconditionally (seeding the manual order from the current order). */
+export function reorderProjectKeys(
+  orderedKeys: readonly string[],
+  activeKey: string,
+  overKey: string,
+): string[] {
+  const next = [...orderedKeys];
+  const fromIndex = next.indexOf(activeKey);
+  const toIndex = next.indexOf(overKey);
+  if (fromIndex === -1 || toIndex === -1 || fromIndex === toIndex) return next;
+  const [moved] = next.splice(fromIndex, 1);
+  next.splice(toIndex, 0, moved!);
+  return next;
+}
+
+// The active-section thread sort modes, in menu order, with their labels.
+// Shared by the Settings → General default-sort select and the per-project
+// sort menu in each grouped-by-project header so the two never drift.
+export const SIDEBAR_SORT_BY_LABELS: Record<SidebarSortBy, string> = {
+  default: "Default",
+  "needs-input": "Needs my attention",
+  "work-type": "Work type",
+  pr: "Has a PR",
+};
+export const SIDEBAR_SORT_BY_OPTIONS: ReadonlyArray<SidebarSortBy> = [
+  "default",
+  "needs-input",
+  "work-type",
+  "pr",
+];
+
+/** A project group's effective thread sort: its per-project override when set,
+    otherwise the global default. Used to sort threads within each group when
+    the sidebar groups the active section by project. */
+export function resolveProjectEffectiveSort(
+  projectKey: string,
+  overrides: Readonly<Record<string, SidebarSortBy>>,
+  globalSortBy: SidebarSortBy,
+): SidebarSortBy {
+  return overrides[projectKey] ?? globalSortBy;
+}
+
 /** Bucket key for threads whose project isn't in the logical project list
     (an environment that dropped offline mid-render, a project removed while
     its threads are still streaming). The rows stay reachable instead of

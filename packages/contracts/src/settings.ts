@@ -301,6 +301,16 @@ const ClientSettingsStruct = Schema.Struct({
   sidebarSortBy: SidebarSortBy.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_SORT_BY)),
   ),
+  // Per-logical-project thread sort. The header sort button writes here; a
+  // project's effective sort is its override, else the global sidebarSortBy.
+  sidebarProjectSortOverrides: Schema.Record(TrimmedNonEmptyString, SidebarSortBy).pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
+  // Manual order of logical project keys when grouping by project. Projects not
+  // listed sort after these in a stable (non-activity) order. Drag reorders it.
+  sidebarProjectManualOrder: Schema.Array(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
   sidebarProjectGroupingMode: SidebarProjectGroupingMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_PROJECT_GROUPING_MODE)),
   ),
@@ -1059,6 +1069,10 @@ export const ClientSettingsPatch = Schema.Struct({
   sidebarGroupBy: Schema.optionalKey(SidebarGroupBy),
   autoClassifyThreads: Schema.optionalKey(Schema.Boolean),
   sidebarSortBy: Schema.optionalKey(SidebarSortBy),
+  sidebarProjectSortOverrides: Schema.optionalKey(
+    Schema.Record(TrimmedNonEmptyString, SidebarSortBy),
+  ),
+  sidebarProjectManualOrder: Schema.optionalKey(Schema.Array(TrimmedNonEmptyString)),
   sidebarProjectGroupingMode: Schema.optionalKey(SidebarProjectGroupingMode),
   sidebarProjectGroupingOverrides: Schema.optionalKey(
     Schema.Record(TrimmedNonEmptyString, SidebarProjectGroupingMode),

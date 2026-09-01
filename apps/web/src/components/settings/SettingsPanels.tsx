@@ -57,6 +57,7 @@ import {
   useEnvironmentStageLabel,
 } from "../SidebarStageBackdrop";
 import { isElectron } from "../../env";
+import { SIDEBAR_SORT_BY_LABELS, SIDEBAR_SORT_BY_OPTIONS } from "../Sidebar.logic";
 import { buildHostedChannelSelectionUrl, type HostedAppChannel } from "../../hostedPairing";
 import { useCustomThemes } from "../../hooks/useCustomThemes";
 import {
@@ -188,19 +189,6 @@ const SIDEBAR_GROUP_BY_OPTIONS: ReadonlyArray<SidebarGroupBy> = [
   "project",
   "workType",
   "stage",
-];
-
-const SIDEBAR_SORT_BY_LABELS: Record<SidebarSortBy, string> = {
-  default: "Default",
-  "needs-input": "Needs my attention",
-  "work-type": "Work type",
-  pr: "Has a PR",
-};
-const SIDEBAR_SORT_BY_OPTIONS: ReadonlyArray<SidebarSortBy> = [
-  "default",
-  "needs-input",
-  "work-type",
-  "pr",
 ];
 
 const BACKGROUND_ACTIVITY_PROFILE_LABELS: Record<BackgroundActivityProfile, string> = {
@@ -2096,7 +2084,7 @@ export function GeneralSettingsPanel() {
 
         <SettingsRow
           {...searchableSetting("sidebar-sort")}
-          description="Reorder active threads. Default keeps the static order; other modes surface threads needing attention, cluster by work type, or float threads with a pull request to the top. When grouping is on, sorting applies within each group."
+          description="The default sort for active threads. Default keeps the static order; other modes surface threads needing attention, cluster by work type, or float threads with a pull request to the top. When grouping by project, each group's header sort button can override this per project; when grouping by work type or stage, sorting applies within each group."
           resetAction={
             settings.sidebarSortBy !== DEFAULT_UNIFIED_SETTINGS.sidebarSortBy ? (
               <SettingResetButton

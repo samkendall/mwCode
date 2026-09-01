@@ -32,10 +32,11 @@ import {
 } from "@t3tools/client-runtime/environment";
 import type { HarnessTaxonomy, ScopedThreadRef, ThreadId } from "@t3tools/contracts";
 import { DEFAULT_HARNESS_TAXONOMY } from "@t3tools/contracts";
-import type { SidebarDensity, TimestampFormat } from "@t3tools/contracts/settings";
+import type { SidebarDensity, SidebarSortBy, TimestampFormat } from "@t3tools/contracts/settings";
 import {
   AlarmClockIcon,
   AlarmClockOffIcon,
+  ArrowUpDownIcon,
   CheckIcon,
   ChevronDownIcon,
   CircleAlertIcon,
@@ -57,6 +58,7 @@ import {
   XIcon,
 } from "lucide-react";
 import {
+  Fragment,
   memo,
   useCallback,
   useEffect,
@@ -104,7 +106,7 @@ import { useThreadActions } from "../hooks/useThreadActions";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { openCommandPalette } from "../commandPaletteBus";
 import { startNewThreadFromContext } from "../lib/chatThreadActions";
-import { useClientSettings } from "../hooks/useSettings";
+import { useClientSettings, useUpdateClientSettings } from "../hooks/useSettings";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useNowMinute } from "../hooks/useNowMinute";
@@ -136,14 +138,19 @@ import {
   isSidebarNestedLinkClick,
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
+  orderProjectGroupsByManualOrder,
   planPinnedReorder,
   reduceSidebarProjectScopeMenuState,
+  reorderProjectKeys,
   resolveAdjacentThreadId,
+  resolveProjectEffectiveSort,
   resolveSettledTimestamp,
   resolveSidebarThreadStatus,
   searchSidebarThreadsByTitle,
   shouldCreateNewThreadInCurrentProject,
   resolveWorkingStartedAt,
+  SIDEBAR_SORT_BY_LABELS,
+  SIDEBAR_SORT_BY_OPTIONS,
   sortActiveThreadsForSidebar,
   sortLogicalProjectsForSidebar,
   sortPinnedThreadsForSidebar,
@@ -496,6 +503,87 @@ function SortablePinnedThreadRow(props: {
     animateLayoutChanges: animatePinnedLayoutChanges,
   });
   return props.children({ listeners, setNodeRef, transform, transition, isDragging });
+}
+
+// A grouped-by-project header made drag-to-reorder. Same sortable contract as
+// the pinned row: whole header is the drag surface (the pointer sensor's
+// distance constraint keeps plain clicks working), no keyboard sensor.
+function SortableProjectGroupHeader(props: {
+  id: string;
+  children: (bag: SortablePinnedRowBag) => ReactNode;
+}) {
+  const { listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: props.id,
+    animateLayoutChanges: animatePinnedLayoutChanges,
+  });
+  return props.children({ listeners, setNodeRef, transform, transition, isDragging });
+}
+
+// Right-aligned per-project thread-sort button for a grouped-by-project header.
+// Reuses the exact labels/order of the Settings default-sort select. Selecting
+// a mode writes that project's override ("Default" clears it back to global).
+// The current effective mode shows checked. stopPropagation keeps clicks off
+// the header's drag/navigation.
+function ProjectGroupSortButton(props: {
+  projectKey: string;
+  effectiveSort: SidebarSortBy;
+  hasOverride: boolean;
+  onSelect: (projectKey: string, mode: SidebarSortBy) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <PopoverTrigger
+              render={
+                <button
+                  type="button"
+                  aria-label={`Sort threads in this project (currently ${SIDEBAR_SORT_BY_LABELS[props.effectiveSort]})`}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => event.stopPropagation()}
+                  onDoubleClick={(event) => event.stopPropagation()}
+                  className={cn(
+                    "inline-flex h-5 min-w-5 shrink-0 cursor-pointer items-center justify-center rounded-md outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring",
+                    props.hasOverride ? "text-foreground/80" : "text-muted-foreground/50",
+                  )}
+                />
+              }
+            />
+          }
+        >
+          <ArrowUpDownIcon aria-hidden className="size-3" />
+        </TooltipTrigger>
+        <TooltipPopup>Sort threads</TooltipPopup>
+      </Tooltip>
+      {open ? (
+        <PopoverPopup side="bottom" align="end" className="w-52" viewportClassName="p-1">
+          <div className="px-2 pb-1 pt-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
+            Sort threads
+          </div>
+          {SIDEBAR_SORT_BY_OPTIONS.map((option) => {
+            const selected = option === props.effectiveSort;
+            return (
+              <button
+                key={option}
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setOpen(false);
+                  props.onSelect(props.projectKey, option);
+                }}
+                className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-foreground/90 hover:bg-accent hover:text-foreground"
+              >
+                <span className="flex-1 truncate">{SIDEBAR_SORT_BY_LABELS[option]}</span>
+                {selected ? <CheckIcon aria-hidden className="size-3.5 shrink-0" /> : null}
+              </button>
+            );
+          })}
+        </PopoverPopup>
+      ) : null}
+    </Popover>
+  );
 }
 
 // One unsent draft session the user has invested content in. Two lines,
@@ -853,6 +941,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     dimension: ClassificationDimension,
     id: string | null,
   ) => void;
+  onResumeStageAuto: (threadRef: ScopedThreadRef) => void;
 }) {
   const {
     isRenaming,
@@ -872,6 +961,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     onUnsnooze,
     onUnpin,
     onUpdateClassification,
+    onResumeStageAuto,
     openPullRequestsInRightPanel,
     renamingTitle,
     thread,
@@ -1197,6 +1287,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     },
     [onUpdateClassification, threadRef],
   );
+  const handleResumeStageAuto = useCallback(() => {
+    onResumeStageAuto(threadRef);
+  }, [onResumeStageAuto, threadRef]);
   // While the snooze popover is open the pointer leaves the row, which
   // would fade the hover actions out from under the open menu; pin them.
   const [snoozeMenuOpenRaw, setSnoozeMenuOpen] = useState(false);
@@ -1424,9 +1517,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             <SidebarThreadClassificationBadges
               workType={thread.workType}
               stage={thread.stage}
+              stageManual={thread.stageManual}
               taxonomy={props.harnessTaxonomy}
               compact
               onSelect={handleUpdateClassification}
+              onResumeStageAuto={handleResumeStageAuto}
             />
             {isRegeneratingTitle ? (
               <span role="status" className="sr-only">
@@ -1437,6 +1532,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               provider glyph moves up here — it is the one identity cue that
               can't be recovered from the title. Settled and snoozed rows are
               history and keep their leaner layout. */}
+            {variantAction === "settle" && driverKind && modelLabel ? (
+              <span className="min-w-0 shrink truncate text-secondary-label text-xs">
+                {modelLabel}
+              </span>
+            ) : null}
             {variantAction === "settle" && driverKind ? (
               <span className="inline-flex shrink-0 items-center">
                 <ProviderInstanceIcon
@@ -1681,6 +1781,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
           <ServerIcon aria-hidden className="size-3.5" />
         </span>
       ) : null}
+      {driverKind && modelLabel ? (
+        <span className="min-w-0 shrink truncate text-secondary-label text-xs">{modelLabel}</span>
+      ) : null}
       {driverKind ? (
         <span className="inline-flex shrink-0 items-center">
           <ProviderInstanceIcon
@@ -1768,8 +1871,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 <SidebarThreadClassificationBadges
                   workType={thread.workType}
                   stage={thread.stage}
+                  stageManual={thread.stageManual}
                   taxonomy={props.harnessTaxonomy}
                   onSelect={handleUpdateClassification}
+                  onResumeStageAuto={handleResumeStageAuto}
                 />
                 <span className="flex min-w-0 flex-1 items-center gap-1.5 truncate whitespace-nowrap">
                   {props.showProjectIdentity && props.projectTitle ? (
@@ -1893,8 +1998,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               <SidebarThreadClassificationBadges
                 workType={thread.workType}
                 stage={thread.stage}
+                stageManual={thread.stageManual}
                 taxonomy={props.harnessTaxonomy}
                 onSelect={handleUpdateClassification}
+                onResumeStageAuto={handleResumeStageAuto}
               />
               {terminalStatusIcon}
               {prBadge}
@@ -2071,6 +2178,9 @@ export default function Sidebar() {
   const sidebarDensity = useClientSettings((s) => s.sidebarDensity);
   const sidebarGroupBy = useClientSettings((s) => s.sidebarGroupBy);
   const sidebarSortBy = useClientSettings((s) => s.sidebarSortBy);
+  const sidebarProjectManualOrder = useClientSettings((s) => s.sidebarProjectManualOrder);
+  const sidebarProjectSortOverrides = useClientSettings((s) => s.sidebarProjectSortOverrides);
+  const updateClientSettings = useUpdateClientSettings();
   const timestampFormat = useClientSettings((s) => s.timestampFormat);
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const {
@@ -2221,6 +2331,14 @@ export default function Sidebar() {
   const projectGroups = useMemo(
     () => sortLogicalProjectsForSidebar(unsortedProjectGroups, threads, sidebarProjectSortOrder),
     [sidebarProjectSortOrder, threads, unsortedProjectGroups],
+  );
+  // Group-by-project header order: a persisted MANUAL order, NOT activity, so a
+  // group never jumps as its threads work. Unlisted projects trail in a stable
+  // alphabetical order. Reused by both the grouped render and the header drag
+  // handler (which seeds the persisted order from this on-screen order).
+  const orderedProjectGroups = useMemo(
+    () => orderProjectGroupsByManualOrder(projectGroups, sidebarProjectManualOrder),
+    [projectGroups, sidebarProjectManualOrder],
   );
   const serverConfigs = useAtomValue(environmentServerConfigsAtom);
   // Threads on non-primary environments (T3 Connect, hosted) resolve their
@@ -2648,12 +2766,20 @@ export default function Sidebar() {
   const activeThreadGroups = useMemo<readonly SidebarActiveGroup[] | null>(() => {
     if (sidebarGroupBy === "off") return null;
     if (sidebarGroupBy === "project") {
+      // Group order is the persisted manual order (not activity). Thread order
+      // WITHIN each group is that project's effective sort (its override, else
+      // the global default), so the header sort button is per-project. Group by
+      // the unsorted active threads, then sort each group's slice.
       return buildSidebarThreadGroups({
-        projects: projectGroups,
-        threads: sortedActiveThreads,
+        projects: orderedProjectGroups,
+        threads: activeThreads,
       }).map((group) => ({
         key: group.key,
-        threads: group.threads,
+        threads: sortActiveThreadsForSidebar(
+          group.threads,
+          resolveProjectEffectiveSort(group.key, sidebarProjectSortOverrides, sidebarSortBy),
+          groupingTaxonomy.workTypes,
+        ),
         showProjectIdentity: group.project === null,
         header: { kind: "project", project: group.project },
       }));
@@ -2671,7 +2797,15 @@ export default function Sidebar() {
       showProjectIdentity: true,
       header: { kind: "taxonomy", label: group.label, color: group.color, known: group.known },
     }));
-  }, [sortedActiveThreads, groupingTaxonomy, projectGroups, sidebarGroupBy]);
+  }, [
+    activeThreads,
+    sortedActiveThreads,
+    groupingTaxonomy,
+    orderedProjectGroups,
+    sidebarGroupBy,
+    sidebarProjectSortOverrides,
+    sidebarSortBy,
+  ]);
   // Every keyboard affordance (jump shortcuts, shift-range select, prewarming)
   // indexes the list as RENDERED, so the flat order is derived from the same
   // plan the rows come from rather than from activeThreads directly.
@@ -2858,7 +2992,10 @@ export default function Sidebar() {
           input:
             dimension === "workType"
               ? { threadId: threadRef.threadId, workType: id }
-              : { threadId: threadRef.threadId, stage: id },
+              : // Manually picking a stage locks it (stageManual: true) so the
+                // server stops auto-updating; clearing it (id === null) unlocks
+                // so the server re-fills on the next turn.
+                { threadId: threadRef.threadId, stage: id, stageManual: id !== null },
         });
         if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
           const error = squashAtomCommandFailure(result);
@@ -2866,6 +3003,30 @@ export default function Sidebar() {
             stackedThreadToast({
               type: "error",
               title: dimension === "workType" ? "Failed to set work type" : "Failed to set stage",
+              description: error instanceof Error ? error.message : "An error occurred.",
+            }),
+          );
+        }
+      })();
+    },
+    [updateThreadMetadata],
+  );
+  // Unlocks a hand-pinned stage: the server resumes per-turn re-assessment on
+  // the next turn. The current stage is left as-is (server re-fills it), so no
+  // flash of "no stage".
+  const resumeThreadStageAuto = useCallback(
+    (threadRef: ScopedThreadRef) => {
+      void (async () => {
+        const result = await updateThreadMetadata({
+          environmentId: threadRef.environmentId,
+          input: { threadId: threadRef.threadId, stageManual: false },
+        });
+        if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+          const error = squashAtomCommandFailure(result);
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Failed to resume automatic stage",
               description: error instanceof Error ? error.message : "An error occurred.",
             }),
           );
@@ -3143,6 +3304,35 @@ export default function Sidebar() {
     [confirmAndUnpinThread],
   );
 
+  // Dragging a grouped-by-project header persists the new project key order to
+  // sidebarProjectManualOrder. The order is seeded from the current on-screen
+  // order (orderedProjectGroups) so a first drag captures every project's
+  // present position, not just the two that moved.
+  const handleProjectGroupDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const activeKey = String(event.active.id);
+      const overKey = event.over === null ? null : String(event.over.id);
+      if (overKey === null || activeKey === overKey) return;
+      const currentKeys = orderedProjectGroups.map((group) => group.projectKey);
+      const nextOrder = reorderProjectKeys(currentKeys, activeKey, overKey);
+      updateClientSettings({ sidebarProjectManualOrder: nextOrder });
+    },
+    [orderedProjectGroups, updateClientSettings],
+  );
+  // Per-project thread sort override: "default" removes the override (falls
+  // back to the global sidebarSortBy), any other mode pins it for that project.
+  const setProjectSortOverride = useCallback(
+    (projectKey: string, mode: SidebarSortBy) => {
+      const next = { ...sidebarProjectSortOverrides };
+      if (mode === "default") {
+        delete next[projectKey];
+      } else {
+        next[projectKey] = mode;
+      }
+      updateClientSettings({ sidebarProjectSortOverrides: next });
+    },
+    [sidebarProjectSortOverrides, updateClientSettings],
+  );
   const handlePinnedDragEnd = useCallback(
     (event: DragEndEvent) => {
       const activeKey = String(event.active.id);
@@ -4316,6 +4506,7 @@ export default function Sidebar() {
                           DEFAULT_HARNESS_TAXONOMY
                         }
                         onUpdateClassification={updateThreadClassification}
+                        onResumeStageAuto={resumeThreadStageAuto}
                       />
                     );
                   };
@@ -4387,71 +4578,160 @@ export default function Sidebar() {
                       />,
                     );
                   }
+                  // A grouped header's inner content. `bag` is the sortable
+                  // handle for draggable project headers; null for the static
+                  // taxonomy/"Other" headers. Project headers also get a
+                  // right-aligned per-project sort button.
+                  const renderGroupHeaderContent = (
+                    group: SidebarActiveGroup,
+                    bag: SortablePinnedRowBag | null,
+                  ) => {
+                    const header = group.header;
+                    const isProject = header.kind === "project";
+                    return (
+                      <li
+                        ref={bag?.setNodeRef}
+                        style={
+                          bag
+                            ? {
+                                transform: CSS.Translate.toString(bag.transform),
+                                transition: bag.transition,
+                              }
+                            : undefined
+                        }
+                        data-thread-selection-safe
+                        className={cn("list-none", bag?.isDragging && "relative z-20 opacity-80")}
+                      >
+                        <div
+                          className="mb-1 mt-3 flex w-full items-center gap-2 px-2.5"
+                          {...(bag?.listeners ?? {})}
+                        >
+                          {header.kind === "project" ? (
+                            header.project ? (
+                              <ProjectFavicon
+                                environmentId={header.project.environmentId}
+                                cwd={header.project.workspaceRoot}
+                                faviconPath={header.project.faviconPath}
+                                className="size-4 shrink-0"
+                              />
+                            ) : (
+                              <FolderIcon
+                                aria-hidden
+                                className="size-4 shrink-0 text-muted-foreground/50"
+                              />
+                            )
+                          ) : (
+                            // Taxonomy color as a dot; unknown/unclassified
+                            // groups get a neutral swatch.
+                            <span
+                              aria-hidden
+                              className={cn(
+                                "size-2.5 shrink-0 rounded-full",
+                                header.color === null && "bg-muted-foreground/40",
+                              )}
+                              style={header.color ? { backgroundColor: header.color } : undefined}
+                            />
+                          )}
+                          <span
+                            className={cn(
+                              "min-w-0 truncate text-xs font-medium",
+                              header.kind === "taxonomy" && !header.known
+                                ? "text-muted-foreground/70"
+                                : "text-secondary-label",
+                            )}
+                          >
+                            {header.kind === "project"
+                              ? (header.project?.displayName ?? "Other")
+                              : header.label}
+                          </span>
+                          <span className="shrink-0 text-xs text-muted-foreground/50 tabular-nums">
+                            {group.threads.length}
+                          </span>
+                          <span className="h-px flex-1 bg-sidebar-border/60" />
+                          {isProject && header.project ? (
+                            <ProjectGroupSortButton
+                              projectKey={group.key}
+                              effectiveSort={resolveProjectEffectiveSort(
+                                group.key,
+                                sidebarProjectSortOverrides,
+                                sidebarSortBy,
+                              )}
+                              hasOverride={sidebarProjectSortOverrides[group.key] !== undefined}
+                              onSelect={setProjectSortOverride}
+                            />
+                          ) : null}
+                        </div>
+                      </li>
+                    );
+                  };
                   if (activeThreadGroups === null) {
                     for (const thread of sortedActiveThreads) {
                       items.push(renderThreadRow(thread, "active"));
                     }
+                  } else if (sidebarGroupBy === "project") {
+                    // Grouped by project: headers drag to reorder (persisted to
+                    // sidebarProjectManualOrder) and each carries a per-project
+                    // sort button. One DndContext wraps the whole block; the
+                    // project headers are the sortable items (rows are inert
+                    // descendants), mirroring the pinned block's nesting. The
+                    // null "Other" bucket is not draggable.
+                    const sortableHeaderKeys = activeThreadGroups
+                      .filter((group) => group.header.kind === "project" && group.header.project)
+                      .map((group) => group.key);
+                    items.push(
+                      <li key="active-project-groups" className="list-none">
+                        <DndContext
+                          sensors={pinnedDndSensors}
+                          collisionDetection={closestCenter}
+                          modifiers={[restrictToVerticalAxis, restrictToFirstScrollableAncestor]}
+                          onDragEnd={handleProjectGroupDragEnd}
+                        >
+                          <SortableContext
+                            items={sortableHeaderKeys}
+                            strategy={verticalListSortingStrategy}
+                          >
+                            <ul role="list" className="flex flex-col gap-px">
+                              {activeThreadGroups.map((group) => {
+                                const draggable =
+                                  group.header.kind === "project" && group.header.project !== null;
+                                return (
+                                  <Fragment key={`active-group:${group.key}`}>
+                                    {draggable ? (
+                                      <SortableProjectGroupHeader id={group.key}>
+                                        {(bag) => renderGroupHeaderContent(group, bag)}
+                                      </SortableProjectGroupHeader>
+                                    ) : (
+                                      renderGroupHeaderContent(group, null)
+                                    )}
+                                    {group.threads.map((thread) =>
+                                      renderThreadRow(
+                                        thread,
+                                        "active",
+                                        undefined,
+                                        group.showProjectIdentity,
+                                      ),
+                                    )}
+                                  </Fragment>
+                                );
+                              })}
+                            </ul>
+                          </SortableContext>
+                        </DndContext>
+                      </li>,
+                    );
                   } else {
-                    // Static labels, not toggles: a collapsible group would
+                    // Grouped by a classification dimension (workType/stage):
+                    // static labels, not toggles. A collapsible group would
                     // need the same route-thread escape hatch the shelves
                     // carry, and grouping is about scanning, not hiding.
                     for (const group of activeThreadGroups) {
-                      const header = group.header;
                       items.push(
-                        <li
-                          key={`active-group:${group.key}`}
-                          data-thread-selection-safe
-                          className="list-none"
-                        >
-                          <div className="mb-1 mt-3 flex w-full items-center gap-2 px-2.5">
-                            {header.kind === "project" ? (
-                              header.project ? (
-                                <ProjectFavicon
-                                  environmentId={header.project.environmentId}
-                                  cwd={header.project.workspaceRoot}
-                                  faviconPath={header.project.faviconPath}
-                                  className="size-4 shrink-0"
-                                />
-                              ) : (
-                                <FolderIcon
-                                  aria-hidden
-                                  className="size-4 shrink-0 text-muted-foreground/50"
-                                />
-                              )
-                            ) : (
-                              // Taxonomy color as a dot; unknown/unclassified
-                              // groups get a neutral swatch.
-                              <span
-                                aria-hidden
-                                className={cn(
-                                  "size-2.5 shrink-0 rounded-full",
-                                  header.color === null && "bg-muted-foreground/40",
-                                )}
-                                style={header.color ? { backgroundColor: header.color } : undefined}
-                              />
-                            )}
-                            <span
-                              className={cn(
-                                "min-w-0 truncate text-xs font-medium",
-                                header.kind === "taxonomy" && !header.known
-                                  ? "text-muted-foreground/70"
-                                  : "text-secondary-label",
-                              )}
-                            >
-                              {header.kind === "project"
-                                ? (header.project?.displayName ?? "Other")
-                                : header.label}
-                            </span>
-                            <span className="shrink-0 text-xs text-muted-foreground/50 tabular-nums">
-                              {group.threads.length}
-                            </span>
-                            <span className="h-px flex-1 bg-sidebar-border/60" />
-                          </div>
-                        </li>,
+                        <Fragment key={`active-group:${group.key}`}>
+                          {renderGroupHeaderContent(group, null)}
+                        </Fragment>,
                       );
-                      // Project groups drop per-row identity (header names the
-                      // project), except the null "Other" bucket. Taxonomy
-                      // groups keep it (header names the type, not the project).
+                      // Taxonomy groups keep per-row identity (header names the
+                      // type, not the project).
                       for (const thread of group.threads) {
                         items.push(
                           renderThreadRow(thread, "active", undefined, group.showProjectIdentity),

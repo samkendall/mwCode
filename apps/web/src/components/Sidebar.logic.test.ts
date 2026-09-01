@@ -23,6 +23,9 @@ import {
   isSidebarNestedLinkClick,
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
+  orderProjectGroupsByManualOrder,
+  reorderProjectKeys,
+  resolveProjectEffectiveSort,
   resolveProjectStatusIndicator,
   resolveThreadRowClassName,
   resolveSidebarThreadStatus,
@@ -936,6 +939,115 @@ describe("sortActiveThreadsForSidebar", () => {
       "pr-old",
       "no-pr-new",
       "no-pr-old",
+    ]);
+  });
+});
+
+describe("orderProjectGroupsByManualOrder", () => {
+  const group = (projectKey: string, displayName: string) => ({ projectKey, displayName });
+
+  it("orders listed projects by the manual order", () => {
+    const projects = [group("a", "Alpha"), group("b", "Bravo"), group("c", "Charlie")];
+    const ordered = orderProjectGroupsByManualOrder(projects, ["c", "a", "b"]);
+    expect(ordered.map((p) => p.projectKey)).toEqual(["c", "a", "b"]);
+  });
+
+  it("appends unlisted projects after listed ones, stably by display name", () => {
+    const projects = [
+      group("zebra", "Zebra"),
+      group("apple", "Apple"),
+      group("listed", "Listed"),
+      group("mango", "Mango"),
+    ];
+    const ordered = orderProjectGroupsByManualOrder(projects, ["listed"]);
+    // Listed first, then the rest alphabetically by display name — never by
+    // activity or input order.
+    expect(ordered.map((p) => p.projectKey)).toEqual(["listed", "apple", "mango", "zebra"]);
+  });
+
+  it("renders alphabetically when the manual order is empty", () => {
+    const projects = [group("b", "Bravo"), group("a", "Alpha"), group("c", "Charlie")];
+    const ordered = orderProjectGroupsByManualOrder(projects, []);
+    expect(ordered.map((p) => p.projectKey)).toEqual(["a", "b", "c"]);
+  });
+
+  it("ignores manual-order keys with no matching project", () => {
+    const projects = [group("a", "Alpha"), group("b", "Bravo")];
+    const ordered = orderProjectGroupsByManualOrder(projects, ["ghost", "b", "a"]);
+    expect(ordered.map((p) => p.projectKey)).toEqual(["b", "a"]);
+  });
+});
+
+describe("reorderProjectKeys", () => {
+  it("moves a key to the target key's slot", () => {
+    expect(reorderProjectKeys(["a", "b", "c", "d"], "a", "c")).toEqual(["b", "c", "a", "d"]);
+    expect(reorderProjectKeys(["a", "b", "c", "d"], "d", "b")).toEqual(["a", "d", "b", "c"]);
+  });
+
+  it("returns a copy unchanged for a no-op or unknown key", () => {
+    expect(reorderProjectKeys(["a", "b"], "a", "a")).toEqual(["a", "b"]);
+    expect(reorderProjectKeys(["a", "b"], "ghost", "b")).toEqual(["a", "b"]);
+  });
+});
+
+describe("resolveProjectEffectiveSort", () => {
+  it("prefers the project override over the global default", () => {
+    expect(resolveProjectEffectiveSort("proj", { proj: "pr" }, "default")).toBe("pr");
+  });
+
+  it("falls back to the global default when there is no override", () => {
+    expect(resolveProjectEffectiveSort("proj", { other: "work-type" }, "needs-input")).toBe(
+      "needs-input",
+    );
+  });
+});
+
+describe("per-project sort composed with project grouping", () => {
+  const t09 = "2026-03-09T09:00:00.000Z";
+  const t10 = "2026-03-09T10:00:00.000Z";
+  const t11 = "2026-03-09T11:00:00.000Z";
+  const taxonomy = [{ id: "bug", label: "Bug" }];
+
+  it("sorts each group by its own effective sort", () => {
+    const projects = [
+      {
+        projectKey: "p1",
+        displayName: "One",
+        memberProjectRefs: [{ environmentId: "e", projectId: "p1" }],
+      },
+      {
+        projectKey: "p2",
+        displayName: "Two",
+        memberProjectRefs: [{ environmentId: "e", projectId: "p2" }],
+      },
+    ];
+    const threads = [
+      { id: "p1-plain", createdAt: t10, environmentId: "e", projectId: "p1" },
+      {
+        id: "p1-input",
+        createdAt: t09,
+        environmentId: "e",
+        projectId: "p1",
+        hasPendingUserInput: true,
+      },
+      { id: "p2-a", createdAt: t11, environmentId: "e", projectId: "p2" },
+      { id: "p2-b", createdAt: t09, environmentId: "e", projectId: "p2" },
+    ];
+    const overrides = { p1: "needs-input" as const };
+    const groups = buildSidebarThreadGroups({ projects, threads }).map((g) => ({
+      key: g.key,
+      threads: sortActiveThreadsForSidebar(
+        g.threads,
+        resolveProjectEffectiveSort(g.key, overrides, "default"),
+        taxonomy,
+      ).map((t) => t.id),
+    }));
+    // p1 uses its needs-input override: the input thread floats above the older
+    // plain one. p2 has no override, so its default static order (newest first)
+    // holds.
+    expect(groups).toEqual([
+      { key: "p1", threads: ["p1-input", "p1-plain"] },
+      { key: "p2", threads: ["p2-a", "p2-b"] },
     ]);
   });
 });
