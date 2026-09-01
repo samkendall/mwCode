@@ -47,15 +47,22 @@ export const DEFAULT_SIDEBAR_THREAD_SORT_ORDER: SidebarThreadSortOrder = "update
 // Sidebar row height. "compact" collapses every section to the one-line row
 // the settled tail already uses; "comfortable" keeps the multi-line card for
 // pinned and active work.
-export const SidebarDensity = Schema.Literals(["comfortable", "compact"]);
+export const SidebarDensity = Schema.Literals(["comfortable", "cozy", "compact"]);
 export type SidebarDensity = typeof SidebarDensity.Type;
-export const DEFAULT_SIDEBAR_DENSITY: SidebarDensity = "comfortable";
+export const DEFAULT_SIDEBAR_DENSITY: SidebarDensity = "cozy";
 
 // How the active section groups threads under headings: not at all, by logical
 // project, or by the thread's harness workType/stage classification.
 export const SidebarGroupBy = Schema.Literals(["off", "project", "workType", "stage"]);
 export type SidebarGroupBy = typeof SidebarGroupBy.Type;
 export const DEFAULT_SIDEBAR_GROUP_BY: SidebarGroupBy = "off";
+
+// How the active section orders threads. "default" keeps the intentionally
+// static order (rows never reshuffle as activity changes). Other modes are an
+// explicit opt-in that reorders by a volatile signal.
+export const SidebarSortBy = Schema.Literals(["default", "needs-input", "work-type", "pr"]);
+export type SidebarSortBy = typeof SidebarSortBy.Type;
+export const DEFAULT_SIDEBAR_SORT_BY: SidebarSortBy = "default";
 
 export const SidebarProjectGroupingMode = Schema.Literals([
   "repository",
@@ -289,6 +296,11 @@ const ClientSettingsStruct = Schema.Struct({
   // first turn (an explicit work-type in the prompt wins, else a small model
   // call). A manual classification always wins over the auto one.
   autoClassifyThreads: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  // Orders the ACTIVE section. "default" preserves the static order; other
+  // modes are an explicit opt-in that reorders by a volatile signal.
+  sidebarSortBy: SidebarSortBy.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_SORT_BY)),
+  ),
   sidebarProjectGroupingMode: SidebarProjectGroupingMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_PROJECT_GROUPING_MODE)),
   ),
@@ -1046,6 +1058,7 @@ export const ClientSettingsPatch = Schema.Struct({
   sidebarDensity: Schema.optionalKey(SidebarDensity),
   sidebarGroupBy: Schema.optionalKey(SidebarGroupBy),
   autoClassifyThreads: Schema.optionalKey(Schema.Boolean),
+  sidebarSortBy: Schema.optionalKey(SidebarSortBy),
   sidebarProjectGroupingMode: Schema.optionalKey(SidebarProjectGroupingMode),
   sidebarProjectGroupingOverrides: Schema.optionalKey(
     Schema.Record(TrimmedNonEmptyString, SidebarProjectGroupingMode),

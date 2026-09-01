@@ -147,7 +147,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "sidebar-density",
     title: "Sidebar density",
     to: "/settings/general",
-    searchTerms: ["compact comfortable single line rows thread list height"],
+    searchTerms: ["compact comfortable cozy single line two line rows thread list height"],
   },
   {
     id: "sidebar-grouping",
@@ -155,6 +155,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/general",
     searchTerms: [
       "sidebar headings sections active threads project work type stage classification group by",
+    ],
+  },
+  {
+    id: "sidebar-sort",
+    title: "Sort threads",
+    to: "/settings/general",
+    searchTerms: [
+      "sidebar order active threads needs attention input approval work type open pull request pr sort by",
     ],
   },
   {

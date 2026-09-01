@@ -1,7 +1,11 @@
 import * as React from "react";
 import { defaultAnimateLayoutChanges, type AnimateLayoutChanges } from "@dnd-kit/sortable";
 import type { ContextMenuItem } from "@t3tools/contracts";
-import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
+import type {
+  SidebarProjectSortOrder,
+  SidebarSortBy,
+  SidebarThreadSortOrder,
+} from "@t3tools/contracts/settings";
 import {
   activeThreadAnchorTimestampMs,
   getThreadSortTimestamp,
@@ -549,6 +553,61 @@ export function sortThreadsForSidebar<
     (left, right) =>
       activeThreadAnchorTimestampMs(right) - activeThreadAnchorTimestampMs(left) ||
       left.id.localeCompare(right.id),
+  );
+}
+
+// Optional signal fields the active-section sort reads. Every field already
+// lives on the thread shell, so no mode adds a subscription or poll.
+type ActiveSortInput = {
+  readonly id: string;
+  readonly createdAt: string;
+  readonly unsettledAt?: string | null | undefined;
+  readonly workType?: string | null | undefined;
+  readonly hasPendingApprovals?: boolean | undefined;
+  readonly hasPendingUserInput?: boolean | undefined;
+  readonly linkedPullRequest?: { readonly number: number } | null | undefined;
+};
+
+/**
+ * Reorders the ACTIVE sidebar section by an explicit sort preference. "default"
+ * is byte-identical to the intentionally static order (sortThreadsForSidebar):
+ * rows never reshuffle as activity changes. Every other mode buckets threads
+ * into a coarse tier (attention needed, work-type cluster, has-PR) and falls
+ * back to the SAME static comparator inside each tier, so a re-sort can only
+ * move a row between tiers — never jitter within one. Keys read straight off
+ * the thread shell, so no mode adds a subscription. When grouping is on, the
+ * caller sorts before grouping so this order becomes the within-group order.
+ */
+export function sortActiveThreadsForSidebar<T extends ActiveSortInput>(
+  threads: readonly T[],
+  sortBy: SidebarSortBy,
+  taxonomy: readonly TaxonomyEntryLike[],
+): T[] {
+  if (sortBy === "default") return sortThreadsForSidebar(threads);
+
+  const staticCompare = (left: T, right: T) =>
+    activeThreadAnchorTimestampMs(right) - activeThreadAnchorTimestampMs(left) ||
+    left.id.localeCompare(right.id);
+
+  const rankOf = (thread: T): number => {
+    switch (sortBy) {
+      case "needs-input":
+        return thread.hasPendingApprovals === true || thread.hasPendingUserInput === true ? 0 : 1;
+      case "work-type": {
+        const raw = thread.workType;
+        const trimmed = raw == null ? "" : raw.trim();
+        // Unset and orphaned ids both sink below every known taxonomy entry.
+        if (trimmed.length === 0) return taxonomy.length;
+        const index = taxonomy.findIndex((entry) => entry.id === trimmed);
+        return index === -1 ? taxonomy.length : index;
+      }
+      case "pr":
+        return thread.linkedPullRequest != null ? 0 : 1;
+    }
+  };
+
+  return [...threads].toSorted(
+    (left, right) => rankOf(left) - rankOf(right) || staticCompare(left, right),
   );
 }
 

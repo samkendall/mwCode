@@ -35,6 +35,7 @@ import {
   MIN_SIDEBAR_AUTO_SETTLE_AFTER_DAYS,
   MIN_TERMINAL_FONT_SIZE,
   type SidebarGroupBy,
+  type SidebarSortBy,
 } from "@t3tools/contracts/settings";
 import { resolveServerBackgroundActivitySettings } from "@t3tools/shared/backgroundActivitySettings";
 import { createModelSelection } from "@t3tools/shared/model";
@@ -167,8 +168,14 @@ const TRANSCRIPT_AUTO_COLLAPSE_LABELS = {
 
 const SIDEBAR_DENSITY_LABELS = {
   comfortable: "Comfortable",
+  cozy: "Cozy",
   compact: "Compact",
 } as const;
+const SIDEBAR_DENSITY_OPTIONS: ReadonlyArray<keyof typeof SIDEBAR_DENSITY_LABELS> = [
+  "comfortable",
+  "cozy",
+  "compact",
+];
 
 const SIDEBAR_GROUP_BY_LABELS: Record<SidebarGroupBy, string> = {
   off: "Off",
@@ -181,6 +188,19 @@ const SIDEBAR_GROUP_BY_OPTIONS: ReadonlyArray<SidebarGroupBy> = [
   "project",
   "workType",
   "stage",
+];
+
+const SIDEBAR_SORT_BY_LABELS: Record<SidebarSortBy, string> = {
+  default: "Default",
+  "needs-input": "Needs my attention",
+  "work-type": "Work type",
+  pr: "Has open PR",
+};
+const SIDEBAR_SORT_BY_OPTIONS: ReadonlyArray<SidebarSortBy> = [
+  "default",
+  "needs-input",
+  "work-type",
+  "pr",
 ];
 
 const BACKGROUND_ACTIVITY_PROFILE_LABELS: Record<BackgroundActivityProfile, string> = {
@@ -528,6 +548,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.sidebarGroupBy !== DEFAULT_UNIFIED_SETTINGS.sidebarGroupBy
         ? ["Thread grouping"]
         : []),
+      ...(settings.sidebarSortBy !== DEFAULT_UNIFIED_SETTINGS.sidebarSortBy ? ["Thread sort"] : []),
       ...(settings.sidebarAutoSettleAfterDays !==
       DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays
         ? ["Auto-settle inactive threads"]
@@ -614,6 +635,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.sidebarAutoSettleOnMerge,
       settings.sidebarDensity,
       settings.sidebarGroupBy,
+      settings.sidebarSortBy,
       settings.sidebarProjectGroupingMode,
       settings.sidebarThreadPreviewCount,
       settings.showSkillsInSlashMenu,
@@ -700,6 +722,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       sidebarThreadPreviewCount: DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount,
       sidebarDensity: DEFAULT_UNIFIED_SETTINGS.sidebarDensity,
       sidebarGroupBy: DEFAULT_UNIFIED_SETTINGS.sidebarGroupBy,
+      sidebarSortBy: DEFAULT_UNIFIED_SETTINGS.sidebarSortBy,
       sidebarProjectGroupingMode: DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode,
       sidebarAutoSettleAfterDays: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays,
       sidebarAutoSettleOnMerge: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge,
@@ -1995,7 +2018,7 @@ export function GeneralSettingsPanel() {
 
         <SettingsRow
           {...searchableSetting("sidebar-density")}
-          description="Compact puts every sidebar thread on a single line."
+          description="Cozy is a denser two-line row; Compact puts every sidebar thread on a single line."
           resetAction={
             settings.sidebarDensity !== DEFAULT_UNIFIED_SETTINGS.sidebarDensity ? (
               <SettingResetButton
@@ -2010,8 +2033,12 @@ export function GeneralSettingsPanel() {
             <Select
               value={settings.sidebarDensity}
               onValueChange={(value) => {
-                if (value === "comfortable" || value === "compact") {
-                  updateSettings({ sidebarDensity: value });
+                if (
+                  SIDEBAR_DENSITY_OPTIONS.includes(value as keyof typeof SIDEBAR_DENSITY_LABELS)
+                ) {
+                  updateSettings({
+                    sidebarDensity: value as keyof typeof SIDEBAR_DENSITY_LABELS,
+                  });
                 }
               }}
             >
@@ -2019,12 +2046,11 @@ export function GeneralSettingsPanel() {
                 <SelectValue>{SIDEBAR_DENSITY_LABELS[settings.sidebarDensity]}</SelectValue>
               </SelectTrigger>
               <SelectPopup align="end" alignItemWithTrigger={false}>
-                <SelectItem hideIndicator value="comfortable">
-                  {SIDEBAR_DENSITY_LABELS.comfortable}
-                </SelectItem>
-                <SelectItem hideIndicator value="compact">
-                  {SIDEBAR_DENSITY_LABELS.compact}
-                </SelectItem>
+                {SIDEBAR_DENSITY_OPTIONS.map((option) => (
+                  <SelectItem hideIndicator key={option} value={option}>
+                    {SIDEBAR_DENSITY_LABELS[option]}
+                  </SelectItem>
+                ))}
               </SelectPopup>
             </Select>
           }
@@ -2061,6 +2087,44 @@ export function GeneralSettingsPanel() {
                 {SIDEBAR_GROUP_BY_OPTIONS.map((option) => (
                   <SelectItem hideIndicator key={option} value={option}>
                     {SIDEBAR_GROUP_BY_LABELS[option]}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("sidebar-sort")}
+          description="Reorder active threads. Default keeps the static order; other modes surface threads needing attention, cluster by work type, or float open pull requests to the top. When grouping is on, sorting applies within each group."
+          resetAction={
+            settings.sidebarSortBy !== DEFAULT_UNIFIED_SETTINGS.sidebarSortBy ? (
+              <SettingResetButton
+                label="thread sort"
+                onClick={() =>
+                  updateSettings({
+                    sidebarSortBy: DEFAULT_UNIFIED_SETTINGS.sidebarSortBy,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={settings.sidebarSortBy}
+              onValueChange={(value) => {
+                if (SIDEBAR_SORT_BY_OPTIONS.includes(value as SidebarSortBy)) {
+                  updateSettings({ sidebarSortBy: value as SidebarSortBy });
+                }
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-40" aria-label="Sort threads by">
+                <SelectValue>{SIDEBAR_SORT_BY_LABELS[settings.sidebarSortBy]}</SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                {SIDEBAR_SORT_BY_OPTIONS.map((option) => (
+                  <SelectItem hideIndicator key={option} value={option}>
+                    {SIDEBAR_SORT_BY_LABELS[option]}
                   </SelectItem>
                 ))}
               </SelectPopup>

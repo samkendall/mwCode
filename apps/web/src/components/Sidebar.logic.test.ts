@@ -32,6 +32,7 @@ import {
   formatWorkingDurationLabel,
   shouldNavigateAfterProjectRemoval,
   shouldClearThreadSelectionOnMouseDown,
+  sortActiveThreadsForSidebar,
   sortLogicalProjectsForSidebar,
   sortSettledThreadsForSidebar,
   pinOrderKeyBetween,
@@ -864,6 +865,78 @@ describe("sortThreadsForSidebar", () => {
     ]);
 
     expect(sorted.map((thread) => thread.id)).toEqual(["newest", "stale-stamp"]);
+  });
+});
+
+describe("sortActiveThreadsForSidebar", () => {
+  const t08 = "2026-03-09T08:00:00.000Z";
+  const t09 = "2026-03-09T09:00:00.000Z";
+  const t10 = "2026-03-09T10:00:00.000Z";
+  const t11 = "2026-03-09T11:00:00.000Z";
+  const t12 = "2026-03-09T12:00:00.000Z";
+  const taxonomy = [
+    { id: "feature", label: "Feature" },
+    { id: "bug", label: "Bug" },
+    { id: "chore", label: "Chore" },
+  ];
+
+  it("reproduces the static order exactly when sorting by default", () => {
+    const threads = [
+      { id: "a", createdAt: t10, hasPendingUserInput: true, workType: "bug" },
+      { id: "b", createdAt: t12 },
+      { id: "c", createdAt: t11, linkedPullRequest: { number: 3 } },
+    ];
+    const ids = sortActiveThreadsForSidebar(threads, "default", taxonomy).map((t) => t.id);
+    expect(ids).toEqual(sortThreadsForSidebar(threads).map((t) => t.id));
+    // Static order is creation-time descending, id tiebreak.
+    expect(ids).toEqual(["b", "c", "a"]);
+  });
+
+  it("floats attention-needing threads first, static order within each tier", () => {
+    const threads = [
+      { id: "old-plain", createdAt: t08 },
+      { id: "new-plain", createdAt: t12 },
+      { id: "old-input", createdAt: t09, hasPendingUserInput: true },
+      { id: "new-approval", createdAt: t11, hasPendingApprovals: true },
+    ];
+    expect(sortActiveThreadsForSidebar(threads, "needs-input", taxonomy).map((t) => t.id)).toEqual([
+      "new-approval",
+      "old-input",
+      "new-plain",
+      "old-plain",
+    ]);
+  });
+
+  it("clusters by taxonomy order, sinking unknown and unset work types last", () => {
+    const threads = [
+      { id: "bug-1", createdAt: t10, workType: "bug" },
+      { id: "feat-1", createdAt: t09, workType: "feature" },
+      { id: "none", createdAt: t12, workType: null },
+      { id: "orphan", createdAt: t11, workType: "legacy" },
+      { id: "bug-2", createdAt: t08, workType: "bug" },
+    ];
+    expect(sortActiveThreadsForSidebar(threads, "work-type", taxonomy).map((t) => t.id)).toEqual([
+      "feat-1",
+      "bug-1",
+      "bug-2",
+      "none",
+      "orphan",
+    ]);
+  });
+
+  it("floats threads with a linked pull request first, static order within each tier", () => {
+    const threads = [
+      { id: "no-pr-new", createdAt: t12 },
+      { id: "pr-old", createdAt: t09, linkedPullRequest: { number: 5 } },
+      { id: "no-pr-old", createdAt: t08 },
+      { id: "pr-new", createdAt: t11, linkedPullRequest: { number: 7 } },
+    ];
+    expect(sortActiveThreadsForSidebar(threads, "pr", taxonomy).map((t) => t.id)).toEqual([
+      "pr-new",
+      "pr-old",
+      "no-pr-new",
+      "no-pr-old",
+    ]);
   });
 });
 

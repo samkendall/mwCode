@@ -144,6 +144,7 @@ import {
   searchSidebarThreadsByTitle,
   shouldCreateNewThreadInCurrentProject,
   resolveWorkingStartedAt,
+  sortActiveThreadsForSidebar,
   sortLogicalProjectsForSidebar,
   sortPinnedThreadsForSidebar,
   sortSettledThreadsForSidebar,
@@ -788,7 +789,7 @@ const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
 
 const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   thread: SidebarThreadSummary;
-  variant: "card" | "slim";
+  variant: "card" | "cozy" | "slim";
   // Slim rows are either settled (action: un-settle) or merely quiet
   // (seen Ready threads — action: settle).
   variantAction: "settle" | "unsettle" | "unsnooze";
@@ -1568,6 +1569,238 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     );
   }
 
+  // Shared top-line status/settle cluster for the card and cozy variants: the
+  // read-only status (or time) cross-fades to the hover/focus settle + snooze
+  // actions. Defined once so both densities behave identically.
+  const topLineStatusSlot = (
+    <span className="group/sidebar-status-slot relative ml-auto flex h-5 min-w-8 shrink-0 items-stretch justify-end text-xs">
+      {/* Read-only status labels yield to the hover actions. Woke is
+          itself an action, so it stays pointer-enabled and visible
+          while the other controls appear beside it. */}
+      <span
+        className={cn(
+          isWokeStatus
+            ? "pointer-events-auto"
+            : "pointer-events-none group-has-[:focus-visible]/sidebar-status-slot:absolute group-has-[:focus-visible]/sidebar-status-slot:right-0 group-has-[:focus-visible]/sidebar-status-slot:opacity-0 group-hover/sidebar-row:absolute group-hover/sidebar-row:right-0 group-hover/sidebar-row:opacity-0",
+          "flex items-center self-center justify-self-end tabular-nums text-secondary-label transition-opacity",
+          snoozeMenuOpen && "pointer-events-none absolute right-0 opacity-0",
+        )}
+      >
+        {topStatus ? (
+          isWokeStatus ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    aria-label="Dismiss Woke notification"
+                    onClick={handleAcknowledgeWokeClick}
+                    className={cn(
+                      "inline-flex cursor-pointer items-center gap-1 rounded-sm font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring",
+                      topStatus.className,
+                    )}
+                  >
+                    <AlarmClockIcon aria-hidden className="size-4 shrink-0" />
+                    <span role="status">{topStatus.label}</span>
+                  </button>
+                }
+              />
+              <TooltipPopup side="top">Dismiss Woke notification</TooltipPopup>
+            </Tooltip>
+          ) : (
+            <span className={cn("inline-flex items-center gap-1 font-medium", topStatus.className)}>
+              {topStatus.icon === "working" ? (
+                <CircleDashedIcon aria-hidden className="size-4 shrink-0" />
+              ) : topStatus.icon === "done" ? (
+                <CircleCheckIcon aria-hidden className="size-4 shrink-0" />
+              ) : null}
+              {/* The label alone is the live region: a role="status"
+                  wrapper around the ticking duration would make
+                  screen readers announce every second. */}
+              <span role="status">{topStatus.label}</span>
+              {status === "working" ? (
+                <span aria-hidden>
+                  <WorkingDuration startedAt={resolveWorkingStartedAt(thread)} />
+                </span>
+              ) : null}
+            </span>
+          )
+        ) : (
+          threadTimeLabel(thread)
+        )}
+      </span>
+      {props.settlementSupported || showSnoozeButton ? (
+        <span
+          className={cn(
+            // focus-visible, not focus-within: a mouse click leaves
+            // the Settle button focused, and a plain focus-within
+            // would keep the controls pinned over the status label
+            // once the pointer moves away (e.g. after a failed
+            // settle) instead of cross-fading back.
+            "pointer-events-none absolute inset-y-0 right-0 flex items-stretch opacity-0 transition-opacity has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:static has-[:focus-visible]:opacity-100 group-hover/sidebar-row:pointer-events-auto group-hover/sidebar-row:static group-hover/sidebar-row:opacity-100",
+            snoozeMenuOpen && "pointer-events-auto static opacity-100",
+          )}
+        >
+          {showSnoozeButton ? (
+            <SnoozePopoverButton
+              open={snoozeMenuOpen}
+              onOpenChange={setSnoozeMenuOpen}
+              onSnooze={handleSnoozePreset}
+              timestampFormat={props.timestampFormat}
+            />
+          ) : null}
+          {props.settlementSupported ? (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    aria-label="Settle thread"
+                    onClick={handleSettleClick}
+                    className="-mr-1 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground hover:text-foreground"
+                  />
+                }
+              >
+                <CheckIcon className="size-3.5" />
+                Settle
+              </TooltipTrigger>
+              <TooltipPopup>Settle thread</TooltipPopup>
+            </Tooltip>
+          ) : null}
+        </span>
+      ) : null}
+    </span>
+  );
+
+  // The provider glyph + remote marker identity cluster, shared by the card's
+  // meta line and the cozy row's line 2.
+  const providerIdentityCluster = (
+    <>
+      {isRemote ? (
+        <span className="inline-flex shrink-0 items-center text-sidebar-muted-foreground/70">
+          <ServerIcon aria-hidden className="size-3.5" />
+        </span>
+      ) : null}
+      {driverKind ? (
+        <span className="inline-flex shrink-0 items-center">
+          <ProviderInstanceIcon
+            driverKind={driverKind}
+            displayName={
+              providerEntry?.displayName ?? thread.session?.providerName ?? modelInstanceId
+            }
+            accentColor={providerEntry?.accentColor}
+            showBadge={showInstanceBadge}
+            // Glyph dims, badge stays saturated; offset matches the composer trigger.
+            iconClassName="size-3.5 opacity-60"
+            badgeClassName="right-[-0.1875rem] bottom-[-0.1875rem] h-3 min-w-3 px-0.5 text-[7px]"
+          />
+        </span>
+      ) : null}
+    </>
+  );
+
+  // Cozy: a two-DENSE-line middle density between the comfortable card and the
+  // compact slim row. Line 1 is title + status/time (with the hover settle
+  // affordance); line 2 packs both classification chips, the branch, and the
+  // PR + provider identity on one row. ~52px tall (h-[3.25rem] + py-0.5).
+  if (variant === "cozy") {
+    const cozySortable = props.sortable;
+    return (
+      <li
+        data-thread-item
+        ref={cozySortable?.setNodeRef}
+        style={
+          cozySortable
+            ? {
+                transform: CSS.Translate.toString(cozySortable.transform),
+                transition: cozySortable.transition,
+              }
+            : undefined
+        }
+        {...(cozySortable?.listeners ?? {})}
+        className={cn(
+          "list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_52px]",
+          cozySortable?.isDragging && "z-20 opacity-80",
+        )}
+      >
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <div
+                role="button"
+                tabIndex={0}
+                data-testid="sidebar-row-cozy"
+                aria-busy={isRegeneratingTitle || undefined}
+                className={rowSurfaceClassName}
+                onClick={handleClick}
+                onDoubleClick={handleDoubleClick}
+                onKeyDown={handleKeyDown}
+                onContextMenu={handleContextMenu}
+              />
+            }
+          >
+            <div className="relative z-10 flex h-[3.25rem] flex-col justify-center gap-0.5 px-[var(--sidebar-row-content-inset)]">
+              {/* Line 1: title (left, truncates) + status-or-time on the right,
+                  which cross-fades to the settle/snooze actions on hover. */}
+              <div className="flex h-5 min-w-0 items-center gap-1.5">
+                {props.showProjectIdentity ? (
+                  <ProjectFavicon
+                    environmentId={thread.environmentId}
+                    cwd={props.projectCwd ?? ""}
+                    faviconPath={props.projectFaviconPath}
+                    className="size-4 shrink-0"
+                    fallbackIcon={MessageSquareIcon}
+                  />
+                ) : null}
+                {title}
+                {isRegeneratingTitle ? (
+                  <span role="status" className="sr-only">
+                    Regenerating title
+                  </span>
+                ) : null}
+                {pinIndicator}
+                {topLineStatusSlot}
+              </div>
+              {/* Line 2: both classification chips + branch on the left; the
+                  relative time (only when the status took line 1's slot), PR
+                  badge, and provider identity on the right. */}
+              <div className="flex h-4 min-w-0 items-center gap-1.5 text-secondary-label text-xs">
+                <SidebarThreadClassificationBadges
+                  workType={thread.workType}
+                  stage={thread.stage}
+                  taxonomy={props.harnessTaxonomy}
+                  onSelect={handleUpdateClassification}
+                />
+                {thread.branch ? (
+                  <>
+                    <ThreadWorktreeIndicator thread={thread} />
+                    <span className="min-w-0 flex-1 truncate whitespace-nowrap">
+                      {thread.branch}
+                    </span>
+                  </>
+                ) : (
+                  <span className="flex-1" />
+                )}
+                <span className="ml-auto flex shrink-0 items-center gap-1.5">
+                  {topStatus ? (
+                    <span className="tabular-nums text-secondary-label">
+                      {threadTimeLabel(thread)}
+                    </span>
+                  ) : null}
+                  {terminalStatusIcon}
+                  {prBadge}
+                  {providerIdentityCluster}
+                </span>
+              </div>
+            </div>
+            {props.jumpLabel ? <JumpHintBadge label={props.jumpLabel} /> : null}
+          </TooltipTrigger>
+          {detailsTooltip}
+        </Tooltip>
+      </li>
+    );
+  }
+
   const diff = latestTurnDiff(thread);
 
   const sortable = props.sortable;
@@ -1632,108 +1865,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   actions on hover/keyboard focus or while the popover is open. Keeping
                   the hidden state out of flow lets the project label reclaim
                   space without either state overlapping it. */}
-              <span className="group/sidebar-status-slot relative ml-auto flex h-5 min-w-8 shrink-0 items-stretch justify-end text-xs">
-                {/* Read-only status labels yield to the hover actions. Woke is
-                    itself an action, so it stays pointer-enabled and visible
-                    while the other controls appear beside it. */}
-                <span
-                  className={cn(
-                    isWokeStatus
-                      ? "pointer-events-auto"
-                      : "pointer-events-none group-has-[:focus-visible]/sidebar-status-slot:absolute group-has-[:focus-visible]/sidebar-status-slot:right-0 group-has-[:focus-visible]/sidebar-status-slot:opacity-0 group-hover/sidebar-row:absolute group-hover/sidebar-row:right-0 group-hover/sidebar-row:opacity-0",
-                    "flex items-center self-center justify-self-end tabular-nums text-secondary-label transition-opacity",
-                    snoozeMenuOpen && "pointer-events-none absolute right-0 opacity-0",
-                  )}
-                >
-                  {topStatus ? (
-                    isWokeStatus ? (
-                      <Tooltip>
-                        <TooltipTrigger
-                          render={
-                            <button
-                              type="button"
-                              aria-label="Dismiss Woke notification"
-                              onClick={handleAcknowledgeWokeClick}
-                              className={cn(
-                                "inline-flex cursor-pointer items-center gap-1 rounded-sm font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring",
-                                topStatus.className,
-                              )}
-                            >
-                              <AlarmClockIcon aria-hidden className="size-4 shrink-0" />
-                              <span role="status">{topStatus.label}</span>
-                            </button>
-                          }
-                        />
-                        <TooltipPopup side="top">Dismiss Woke notification</TooltipPopup>
-                      </Tooltip>
-                    ) : (
-                      <span
-                        className={cn(
-                          "inline-flex items-center gap-1 font-medium",
-                          topStatus.className,
-                        )}
-                      >
-                        {topStatus.icon === "working" ? (
-                          <CircleDashedIcon aria-hidden className="size-4 shrink-0" />
-                        ) : topStatus.icon === "done" ? (
-                          <CircleCheckIcon aria-hidden className="size-4 shrink-0" />
-                        ) : null}
-                        {/* The label alone is the live region: a role="status"
-                            wrapper around the ticking duration would make
-                            screen readers announce every second. */}
-                        <span role="status">{topStatus.label}</span>
-                        {status === "working" ? (
-                          <span aria-hidden>
-                            <WorkingDuration startedAt={resolveWorkingStartedAt(thread)} />
-                          </span>
-                        ) : null}
-                      </span>
-                    )
-                  ) : (
-                    threadTimeLabel(thread)
-                  )}
-                </span>
-                {props.settlementSupported || showSnoozeButton ? (
-                  <span
-                    className={cn(
-                      // focus-visible, not focus-within: a mouse click leaves
-                      // the Settle button focused, and a plain focus-within
-                      // would keep the controls pinned over the status label
-                      // once the pointer moves away (e.g. after a failed
-                      // settle) instead of cross-fading back.
-                      "pointer-events-none absolute inset-y-0 right-0 flex items-stretch opacity-0 transition-opacity has-[:focus-visible]:pointer-events-auto has-[:focus-visible]:static has-[:focus-visible]:opacity-100 group-hover/sidebar-row:pointer-events-auto group-hover/sidebar-row:static group-hover/sidebar-row:opacity-100",
-                      snoozeMenuOpen && "pointer-events-auto static opacity-100",
-                    )}
-                  >
-                    {showSnoozeButton ? (
-                      <SnoozePopoverButton
-                        open={snoozeMenuOpen}
-                        onOpenChange={setSnoozeMenuOpen}
-                        onSnooze={handleSnoozePreset}
-                        timestampFormat={props.timestampFormat}
-                      />
-                    ) : null}
-                    {props.settlementSupported ? (
-                      <Tooltip>
-                        <TooltipTrigger
-                          render={
-                            <button
-                              type="button"
-                              aria-label="Settle thread"
-                              onClick={handleSettleClick}
-                              className="-mr-1 inline-flex cursor-pointer items-center gap-1 rounded-md bg-transparent px-1.5 text-xs text-muted-foreground hover:text-foreground"
-                            />
-                          }
-                        >
-                          <CheckIcon className="size-3.5" />
-                          Settle
-                        </TooltipTrigger>
-                        <TooltipPopup>Settle thread</TooltipPopup>
-                      </Tooltip>
-                    ) : null}
-                  </span>
-                ) : null}
-              </span>
+              {topLineStatusSlot}
             </div>
             <div className="mt-1 flex min-w-0">
               {title}
@@ -1935,6 +2067,7 @@ export default function Sidebar() {
   const sidebarProjectSortOrder = useClientSettings((s) => s.sidebarProjectSortOrder);
   const sidebarDensity = useClientSettings((s) => s.sidebarDensity);
   const sidebarGroupBy = useClientSettings((s) => s.sidebarGroupBy);
+  const sidebarSortBy = useClientSettings((s) => s.sidebarSortBy);
   const timestampFormat = useClientSettings((s) => s.timestampFormat);
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const {
@@ -2499,23 +2632,34 @@ export default function Sidebar() {
   // its own showProjectIdentity: project groups name the project (rows drop
   // it, except the null "Other" bucket), taxonomy groups name the type (rows
   // keep project identity).
+  // The active section's visual order. "default" reproduces the intentionally
+  // static order byte-for-byte; other modes tier by an explicit signal
+  // (attention, work-type cluster, has-PR) and fall back to the static
+  // comparator so rows never jitter. Sorting happens BEFORE grouping, so when
+  // group-by is on this becomes the within-group order (group order is
+  // untouched). Work-type clustering reads the same taxonomy grouping uses.
+  const sortedActiveThreads = useMemo(
+    () => sortActiveThreadsForSidebar(activeThreads, sidebarSortBy, groupingTaxonomy.workTypes),
+    [activeThreads, groupingTaxonomy, sidebarSortBy],
+  );
   const activeThreadGroups = useMemo<readonly SidebarActiveGroup[] | null>(() => {
     if (sidebarGroupBy === "off") return null;
     if (sidebarGroupBy === "project") {
-      return buildSidebarThreadGroups({ projects: projectGroups, threads: activeThreads }).map(
-        (group) => ({
-          key: group.key,
-          threads: group.threads,
-          showProjectIdentity: group.project === null,
-          header: { kind: "project", project: group.project },
-        }),
-      );
+      return buildSidebarThreadGroups({
+        projects: projectGroups,
+        threads: sortedActiveThreads,
+      }).map((group) => ({
+        key: group.key,
+        threads: group.threads,
+        showProjectIdentity: group.project === null,
+        header: { kind: "project", project: group.project },
+      }));
     }
     const dimension = sidebarGroupBy;
     const entries = dimension === "workType" ? groupingTaxonomy.workTypes : groupingTaxonomy.stages;
     return buildSidebarThreadGroupsByTaxonomy({
       taxonomy: entries,
-      threads: activeThreads,
+      threads: sortedActiveThreads,
       getValue: (thread) => (dimension === "workType" ? thread.workType : thread.stage),
       unclassifiedLabel: "Unclassified",
     }).map((group) => ({
@@ -2524,16 +2668,16 @@ export default function Sidebar() {
       showProjectIdentity: true,
       header: { kind: "taxonomy", label: group.label, color: group.color, known: group.known },
     }));
-  }, [activeThreads, groupingTaxonomy, projectGroups, sidebarGroupBy]);
+  }, [sortedActiveThreads, groupingTaxonomy, projectGroups, sidebarGroupBy]);
   // Every keyboard affordance (jump shortcuts, shift-range select, prewarming)
   // indexes the list as RENDERED, so the flat order is derived from the same
   // plan the rows come from rather than from activeThreads directly.
   const orderedActiveThreads = useMemo(
     () =>
       activeThreadGroups === null
-        ? activeThreads
+        ? sortedActiveThreads
         : activeThreadGroups.flatMap((group) => group.threads),
-    [activeThreadGroups, activeThreads],
+    [activeThreadGroups, sortedActiveThreads],
   );
   const orderedThreads = useMemo(
     () => [
@@ -4054,12 +4198,18 @@ export default function Sidebar() {
                     // things that collapse a row: every other thread is a full
                     // card, and density comes from users (or the auto rules)
                     // actually parking work rather than the sidebar
-                    // second-guessing what still matters. Compact density is
-                    // the user overriding that: every section goes one-line.
-                    const isCard =
-                      sidebarDensity !== "compact" &&
-                      (section === "active" || section === "pinned");
-                    const rowVariant = isCard ? "card" : "slim";
+                    // second-guessing what still matters. Cozy is the middle
+                    // density — a denser two-line row for active/pinned work —
+                    // and compact is the user overriding both: every section
+                    // goes one-line. Settled/snoozed always render slim.
+                    const isLiveSection = section === "active" || section === "pinned";
+                    const rowVariant: "card" | "cozy" | "slim" = !isLiveSection
+                      ? "slim"
+                      : sidebarDensity === "compact"
+                        ? "slim"
+                        : sidebarDensity === "cozy"
+                          ? "cozy"
+                          : "card";
                     return (
                       <SidebarThreadRow
                         // Keyed per variant on purpose: when a thread settles,
@@ -4235,7 +4385,7 @@ export default function Sidebar() {
                     );
                   }
                   if (activeThreadGroups === null) {
-                    for (const thread of activeThreads) {
+                    for (const thread of sortedActiveThreads) {
                       items.push(renderThreadRow(thread, "active"));
                     }
                   } else {
