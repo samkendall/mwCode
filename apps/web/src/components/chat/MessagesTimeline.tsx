@@ -1773,9 +1773,10 @@ const AgentSpawnCtaRow = memo(function AgentSpawnCtaRow(props: {
       <BotIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
       <span className="min-w-0 truncate font-medium">{lead}</span>
       <span className="ml-auto flex min-w-0 items-center gap-2 font-mono text-[.7rem] text-muted-foreground">
-        <span className={cn("truncate", failed > 0 && "text-destructive")}>
+        <span className="truncate">
           {!live && failed === 0 && stopped === 0 ? <span aria-hidden="true">✓ </span> : null}
-          {status}
+          {live && failed > 0 ? `${working} working · ` : failed > 0 ? null : status}
+          {failed > 0 ? <span className="text-destructive">{failed} failed</span> : null}
         </span>
         <span className="shrink-0 text-info-foreground">{live ? "Open Agents ▸" : "View ▸"}</span>
       </span>

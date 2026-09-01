@@ -1668,8 +1668,8 @@ describe("MessagesTimeline", () => {
     );
 
     expect(markup).toContain("Kicked off 2 agents");
-    expect(markup).toContain("1 working · 1 failed");
-    expect(markup).toContain("text-destructive");
+    expect(markup).toContain("1 working · ");
+    expect(markup).toContain('<span class="text-destructive">1 failed</span>');
     expect(markup).toContain(
       'aria-label="Kicked off 2 agents, 1 working · 1 failed. Open Agents panel"',
     );
