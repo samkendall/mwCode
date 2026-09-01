@@ -45,7 +45,11 @@ A user-visible log item attached to a thread. In [the contracts][1], activities 
 
 #### Work type and stage
 
-Fork-local per-thread classification metadata. `workType` describes the kind of work (for example a feature or a bug) and `stage` describes where it sits in a workflow (for example triage or in-review). Both are optional, nullable strings that are only ever set after the first turn via `thread.meta.update` (never at thread creation), and null clears them. Today they are unconstrained non-empty strings; a runtime-config taxonomy to constrain and label the allowed values is planned but does not exist yet.
+Fork-local per-thread classification metadata. `workType` describes the kind of work (for example a feature or a bug) and `stage` describes where it sits in a workflow (for example planning or building). Both are optional, nullable strings that are only ever set after the first turn via `thread.meta.update` (never at thread creation), and null clears them. On the wire they remain unconstrained non-empty strings; the allowed ids and their display metadata come from the harness taxonomy.
+
+#### Harness taxonomy
+
+Fork-local, runtime-configurable vocabulary for the [work type and stage](#work-type-and-stage) fields. It defines the allowed ids plus display metadata (label, color) and an optional one-line hint (also usable as an LLM classification cue). It is defined in [the contracts][1] (`HarnessTaxonomy`, with `DEFAULT_HARNESS_TAXONOMY` as the seed) and loaded server-side from a global `<baseDir>/harness.json` and a per-project `<workspaceRoot>/.mwcode/harness.json`, each merged over the defaults by id. The effective global set rides on the server-config snapshot so clients can render labels and colors without a request. Loaded at config-load time (no hot reload); malformed or invalid files log a warning and fall back to the layer below.
 
 ### Orchestration
 

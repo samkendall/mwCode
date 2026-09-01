@@ -21,6 +21,7 @@ import { EditorId, FileManagerRevealKind, RemoteOpenTarget } from "./editor.ts";
 import { ModelCapabilities } from "./model.ts";
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import { ServerSettings } from "./settings.ts";
+import { HarnessTaxonomy } from "./harnessTaxonomy.ts";
 
 const KeybindingsMalformedConfigIssue = Schema.Struct({
   kind: Schema.Literal("keybindings.malformed-config"),
@@ -523,6 +524,14 @@ export const ServerConfig = Schema.Struct({
   remoteOpenTargets: Schema.optionalKey(ForwardCompatibleArray(RemoteOpenTarget)),
   observability: ServerObservability,
   settings: ServerSettings,
+  /**
+   * Fork-local classification vocabulary (the effective default+global merge)
+   * for thread `workType`/`stage`. Optional so snapshots from servers that
+   * predate the fork feature still decode; clients treat absence as
+   * `DEFAULT_HARNESS_TAXONOMY`. Per-project overrides are resolved server-side
+   * and not carried here yet.
+   */
+  harnessTaxonomy: Schema.optionalKey(HarnessTaxonomy),
   /** Whether shell subscriptions can emit an opt-in catch-up completion marker. */
   shellResumeCompletionMarker: Schema.optionalKey(Schema.Boolean),
   /** Whether shell.openInEditor honors `LaunchEditorInput.reveal` for the

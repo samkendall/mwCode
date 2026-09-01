@@ -734,6 +734,14 @@ export function createServerEnvironmentAtoms<R, E>(
       Atom.withLabel(`environment-data:server:settings:${environmentId}`),
     ),
   );
+  // Fork-local thread-classification vocabulary. Null until the config lands
+  // (or on a server that predates the feature); consumers fall back to
+  // DEFAULT_HARNESS_TAXONOMY.
+  const harnessTaxonomyValueAtom = Atom.family((environmentId: EnvironmentId) =>
+    Atom.make((get) => get(configValueAtom(environmentId))?.harnessTaxonomy ?? null).pipe(
+      Atom.withLabel(`environment-data:server:harness-taxonomy:${environmentId}`),
+    ),
+  );
   const providersValueAtom = Atom.family((environmentId: EnvironmentId) =>
     Atom.make((get) => get(configValueAtom(environmentId))?.providers ?? null).pipe(
       Atom.withLabel(`environment-data:server:providers:${environmentId}`),
@@ -744,6 +752,7 @@ export function createServerEnvironmentAtoms<R, E>(
     configValueAtom,
     updateStateAtom,
     settingsValueAtom,
+    harnessTaxonomyValueAtom,
     providersValueAtom,
     traceDiagnostics: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:server:trace-diagnostics",
