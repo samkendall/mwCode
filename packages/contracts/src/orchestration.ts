@@ -481,6 +481,10 @@ export const OrchestrationThread = Schema.Struct({
   // interop.
   workType: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   stage: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  // When true, the user pinned `stage` by hand and the server's per-turn
+  // re-assessment must leave it alone until they resume auto. workType has no
+  // such flag: it is only ever set once (first turn) and never re-assessed.
+  stageManual: Schema.optional(Schema.NullOr(Schema.Boolean)),
   // Pending-only state. Optional so older servers remain compatible.
   titleRegeneration: Schema.optional(Schema.NullOr(ThreadTitleRegeneration)),
   deletedAt: Schema.NullOr(IsoDateTime),
@@ -546,6 +550,10 @@ export const OrchestrationThreadShell = Schema.Struct({
   // See OrchestrationThread.workType/stage: fork-local, non-empty strings.
   workType: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   stage: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  // When true, the user pinned `stage` by hand and the server's per-turn
+  // re-assessment must leave it alone until they resume auto. workType has no
+  // such flag: it is only ever set once (first turn) and never re-assessed.
+  stageManual: Schema.optional(Schema.NullOr(Schema.Boolean)),
   titleRegeneration: Schema.optional(Schema.NullOr(ThreadTitleRegeneration)),
   session: Schema.NullOr(OrchestrationSession),
   latestUserMessageAt: Schema.NullOr(IsoDateTime),
@@ -854,6 +862,10 @@ const ThreadMetaUpdateCommand = Schema.Struct({
   // Absent = leave unchanged; null = clear; non-empty string sets the value.
   workType: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   stage: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  // When true, the user pinned `stage` by hand and the server's per-turn
+  // re-assessment must leave it alone until they resume auto. workType has no
+  // such flag: it is only ever set once (first turn) and never re-assessed.
+  stageManual: Schema.optional(Schema.NullOr(Schema.Boolean)),
 }).check(
   Schema.makeFilter(
     (input) =>
@@ -1308,6 +1320,10 @@ export const ThreadMetaUpdatedPayload = Schema.Struct({
       See OrchestrationThread.workType. */
   workType: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   stage: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  // When true, the user pinned `stage` by hand and the server's per-turn
+  // re-assessment must leave it alone until they resume auto. workType has no
+  // such flag: it is only ever set once (first turn) and never re-assessed.
+  stageManual: Schema.optional(Schema.NullOr(Schema.Boolean)),
   updatedAt: IsoDateTime,
 });
 

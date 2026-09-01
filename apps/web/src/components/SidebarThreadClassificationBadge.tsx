@@ -1,5 +1,5 @@
 import { memo, useState } from "react";
-import { CheckIcon, XIcon } from "lucide-react";
+import { CheckIcon, LockIcon, RotateCcwIcon, XIcon } from "lucide-react";
 import type { CSSProperties } from "react";
 import type { HarnessTaxonomy, HarnessTaxonomyEntry } from "@t3tools/contracts";
 
@@ -36,6 +36,11 @@ const ClassificationChip = memo(function ClassificationChip(props: {
   value: string | null | undefined;
   dimension: ClassificationDimension;
   dimensionLabel: string;
+  // Stage only: true when the user pinned the stage by hand, so the server's
+  // per-turn re-assessment leaves it alone. Drives the lock glyph and the
+  // "Resume auto" menu item. workType never locks.
+  locked?: boolean;
+  onResumeAuto?: () => void;
   onSelect: (dimension: ClassificationDimension, id: string | null) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -44,13 +49,14 @@ const ClassificationChip = memo(function ClassificationChip(props: {
   const dotStyle: CSSProperties | undefined = badge.color
     ? { backgroundColor: badge.color }
     : undefined;
+  const locked = props.locked === true;
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         render={
           <button
             type="button"
-            aria-label={`${props.dimensionLabel}: ${badge.label}. Change ${props.dimensionLabel.toLowerCase()}`}
+            aria-label={`${props.dimensionLabel}: ${badge.label}${locked ? " (locked)" : ""}. Change ${props.dimensionLabel.toLowerCase()}`}
             onClick={(event) => event.stopPropagation()}
             onDoubleClick={(event) => event.stopPropagation()}
             className={cn(CHIP_CLASS, badge.color === null && "border-border/60 bg-muted/40")}
@@ -67,6 +73,9 @@ const ClassificationChip = memo(function ClassificationChip(props: {
           style={dotStyle}
         />
         <span className="truncate">{badge.label}</span>
+        {locked ? (
+          <LockIcon aria-hidden className="size-2.5 shrink-0 text-muted-foreground/70" />
+        ) : null}
       </PopoverTrigger>
       {open ? (
         <PopoverPopup side="bottom" align="start" className="w-52" viewportClassName="p-1">
@@ -100,6 +109,20 @@ const ClassificationChip = memo(function ClassificationChip(props: {
             );
           })}
           <div aria-hidden className="mx-1 my-1 h-px bg-border/60" />
+          {locked && props.onResumeAuto ? (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                setOpen(false);
+                props.onResumeAuto?.();
+              }}
+              className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              <RotateCcwIcon aria-hidden className="size-3.5 shrink-0" />
+              <span className="flex-1">Resume auto</span>
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={(event) => {
@@ -128,9 +151,13 @@ export const SidebarThreadClassificationBadges = memo(
   function SidebarThreadClassificationBadges(props: {
     workType: string | null | undefined;
     stage: string | null | undefined;
+    // True when the user pinned the stage by hand; shows a lock glyph and a
+    // "Resume auto" option on the stage chip.
+    stageManual?: boolean | null | undefined;
     taxonomy: HarnessTaxonomy;
     compact?: boolean;
     onSelect: (dimension: ClassificationDimension, id: string | null) => void;
+    onResumeStageAuto: () => void;
   }) {
     return (
       <>
@@ -147,6 +174,8 @@ export const SidebarThreadClassificationBadges = memo(
             value={props.stage}
             dimension="stage"
             dimensionLabel="Stage"
+            locked={props.stageManual === true}
+            onResumeAuto={props.onResumeStageAuto}
             onSelect={props.onSelect}
           />
         )}
