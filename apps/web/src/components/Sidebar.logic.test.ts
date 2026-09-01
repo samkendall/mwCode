@@ -6,6 +6,9 @@ import {
   buildBulkTitleRegenerationContextMenuItem,
   buildMultiSelectThreadContextMenuItems,
   buildSidebarThreadGroups,
+  buildSidebarThreadGroupsByTaxonomy,
+  resolveClassificationBadge,
+  SIDEBAR_UNCLASSIFIED_GROUP_KEY,
   createThreadJumpHintVisibilityController,
   filterSidebarProjectScopeItems,
   getSidebarThreadIdsToPrewarm,
@@ -979,6 +982,159 @@ describe("buildSidebarThreadGroups", () => {
       { key: "known", showProjectIdentity: false },
       { key: SIDEBAR_UNGROUPED_THREADS_KEY, showProjectIdentity: true },
     ]);
+  });
+});
+
+describe("resolveClassificationBadge", () => {
+  const workTypes = [
+    { id: "feature", label: "Feature", color: "#3b82f6" },
+    { id: "bug", label: "Bug", color: "#ef4444" },
+    { id: "chore", label: "Chore" },
+  ];
+
+  it("maps a known id to its taxonomy label and color", () => {
+    expect(resolveClassificationBadge(workTypes, "feature")).toEqual({
+      id: "feature",
+      label: "Feature",
+      color: "#3b82f6",
+      known: true,
+    });
+  });
+
+  it("treats a known id without a color as known with a null color", () => {
+    expect(resolveClassificationBadge(workTypes, "chore")).toEqual({
+      id: "chore",
+      label: "Chore",
+      color: null,
+      known: true,
+    });
+  });
+
+  it("renders an orphaned id as its raw value, muted", () => {
+    expect(resolveClassificationBadge(workTypes, "legacy-id")).toEqual({
+      id: "legacy-id",
+      label: "legacy-id",
+      color: null,
+      known: false,
+    });
+  });
+
+  it("trims surrounding whitespace before matching", () => {
+    expect(resolveClassificationBadge(workTypes, "  bug  ")).toMatchObject({
+      id: "bug",
+      label: "Bug",
+      known: true,
+    });
+  });
+
+  it("returns no badge for null, undefined, empty, or whitespace-only values", () => {
+    expect(resolveClassificationBadge(workTypes, null)).toBeNull();
+    expect(resolveClassificationBadge(workTypes, undefined)).toBeNull();
+    expect(resolveClassificationBadge(workTypes, "")).toBeNull();
+    expect(resolveClassificationBadge(workTypes, "   ")).toBeNull();
+  });
+});
+
+describe("buildSidebarThreadGroupsByTaxonomy", () => {
+  const taxonomy = [
+    { id: "feature", label: "Feature", color: "#3b82f6" },
+    { id: "bug", label: "Bug", color: "#ef4444" },
+    { id: "chore", label: "Chore" },
+  ];
+  const thread = (id: string, workType: string | null | undefined) => ({ id, workType });
+  const build = (threads: ReadonlyArray<{ id: string; workType: string | null | undefined }>) =>
+    buildSidebarThreadGroupsByTaxonomy({
+      taxonomy,
+      threads,
+      getValue: (entry) => entry.workType,
+      unclassifiedLabel: "Unclassified",
+    });
+
+  it("orders groups by taxonomy order and keeps input thread order within each", () => {
+    const groups = build([
+      thread("bug-1", "bug"),
+      thread("feature-1", "feature"),
+      thread("bug-2", "bug"),
+    ]);
+
+    expect(groups.map((group) => group.key)).toEqual(["feature", "bug"]);
+    expect(groups.map((group) => group.threads.map((entry) => entry.id))).toEqual([
+      ["feature-1"],
+      ["bug-1", "bug-2"],
+    ]);
+    // The flat read is what the keyboard jump shortcuts index by.
+    expect(groups.flatMap((group) => group.threads).map((entry) => entry.id)).toEqual([
+      "feature-1",
+      "bug-1",
+      "bug-2",
+    ]);
+  });
+
+  it("drops taxonomy entries with no threads and carries label + color", () => {
+    const groups = build([thread("only", "feature")]);
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toMatchObject({
+      key: "feature",
+      label: "Feature",
+      color: "#3b82f6",
+      known: true,
+    });
+  });
+
+  it("places unknown ids after taxonomy groups in first-appearance order, muted", () => {
+    const groups = build([
+      thread("legacy-z", "zeta"),
+      thread("feature-1", "feature"),
+      thread("legacy-a", "alpha"),
+      thread("legacy-z2", "zeta"),
+    ]);
+
+    expect(groups.map((group) => group.key)).toEqual(["feature", "zeta", "alpha"]);
+    expect(groups.slice(1).every((group) => group.known === false)).toBe(true);
+    expect(groups.slice(1).every((group) => group.color === null)).toBe(true);
+    expect(groups[1]).toMatchObject({ key: "zeta", label: "zeta" });
+    expect(groups[1]?.threads.map((entry) => entry.id)).toEqual(["legacy-z", "legacy-z2"]);
+  });
+
+  it("collects null, undefined, empty, and whitespace values into a trailing Unclassified bucket", () => {
+    const groups = build([
+      thread("blank", ""),
+      thread("spaces", "   "),
+      thread("feature-1", "feature"),
+      thread("missing", null),
+      thread("absent", undefined),
+    ]);
+
+    expect(groups.map((group) => group.key)).toEqual(["feature", SIDEBAR_UNCLASSIFIED_GROUP_KEY]);
+    const unclassified = groups.at(-1);
+    expect(unclassified).toMatchObject({ label: "Unclassified", known: false, color: null });
+    expect(unclassified?.threads.map((entry) => entry.id)).toEqual([
+      "blank",
+      "spaces",
+      "missing",
+      "absent",
+    ]);
+  });
+
+  it("orders known, unknown, and unclassified groups together correctly", () => {
+    const groups = build([
+      thread("orphan", "legacy"),
+      thread("none", null),
+      thread("bug-1", "bug"),
+      thread("feature-1", "feature"),
+    ]);
+
+    expect(groups.map((group) => group.key)).toEqual([
+      "feature",
+      "bug",
+      "legacy",
+      SIDEBAR_UNCLASSIFIED_GROUP_KEY,
+    ]);
+  });
+
+  it("returns no groups when there are no threads", () => {
+    expect(build([])).toEqual([]);
   });
 });
 

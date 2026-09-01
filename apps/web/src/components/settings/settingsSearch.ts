@@ -150,10 +150,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["compact comfortable single line rows thread list height"],
   },
   {
-    id: "group-threads-by-project",
-    title: "Group threads by project",
+    id: "sidebar-grouping",
+    title: "Group threads",
     to: "/settings/general",
-    searchTerms: ["sidebar headings sections per project active threads"],
+    searchTerms: [
+      "sidebar headings sections active threads project work type stage classification group by",
+    ],
   },
   {
     id: "auto-settle-inactive-threads",

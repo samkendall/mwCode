@@ -30,7 +30,8 @@ import {
   scopeThreadRef,
   scopedThreadKey,
 } from "@t3tools/client-runtime/environment";
-import type { ScopedThreadRef, ThreadId } from "@t3tools/contracts";
+import type { HarnessTaxonomy, ScopedThreadRef, ThreadId } from "@t3tools/contracts";
+import { DEFAULT_HARNESS_TAXONOMY } from "@t3tools/contracts";
 import type { SidebarDensity, TimestampFormat } from "@t3tools/contracts/settings";
 import {
   AlarmClockIcon,
@@ -127,6 +128,7 @@ import {
   animatePinnedLayoutChanges,
   buildBulkTitleRegenerationContextMenuItem,
   buildSidebarThreadGroups,
+  buildSidebarThreadGroupsByTaxonomy,
   filterSidebarProjectScopeItems,
   formatWorkingDurationLabel,
   firstValidTimestampMs,
@@ -170,6 +172,10 @@ import {
   snoozeWakeLabel,
   type SnoozePreset,
 } from "./Sidebar.snooze";
+import {
+  SidebarThreadClassificationBadges,
+  type ClassificationDimension,
+} from "./SidebarThreadClassificationBadge";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { ProviderInstanceIcon } from "./chat/ProviderInstanceIcon";
 import { getTriggerDisplayModelLabel } from "./chat/providerIconUtils";
@@ -450,6 +456,24 @@ function SnoozePopoverButton(props: {
       </PopoverPopup>
     </Popover>
   );
+}
+
+// One active-section group after the group-by setting resolves. `header`
+// discriminates how the group's heading renders (a project's favicon+name, or
+// a classification chip's label+color); `showProjectIdentity` overrides
+// whether the rows under it keep their own favicon + project title.
+interface SidebarActiveGroup {
+  readonly key: string;
+  readonly threads: readonly EnvironmentThreadShell[];
+  readonly showProjectIdentity: boolean;
+  readonly header:
+    | { readonly kind: "project"; readonly project: SidebarProjectSnapshot | null }
+    | {
+        readonly kind: "taxonomy";
+        readonly label: string;
+        readonly color: string | null;
+        readonly known: boolean;
+      };
 }
 
 // Subset of useSortable applied to a pinned card's root <li>. Listeners go
@@ -820,6 +844,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     threadKey: string,
     snapshot: ThreadChangeRequestSnapshot | null,
   ) => void;
+  // Effective work-type/stage vocabulary for this thread's environment. Chips
+  // resolve labels + colors from it and offer its options on click.
+  harnessTaxonomy: HarnessTaxonomy;
+  onUpdateClassification: (
+    threadRef: ScopedThreadRef,
+    dimension: ClassificationDimension,
+    id: string | null,
+  ) => void;
 }) {
   const {
     isRenaming,
@@ -838,6 +870,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     onUnsettle,
     onUnsnooze,
     onUnpin,
+    onUpdateClassification,
     openPullRequestsInRightPanel,
     renamingTitle,
     thread,
@@ -1157,6 +1190,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     },
     [onSnooze, threadRef],
   );
+  const handleUpdateClassification = useCallback(
+    (dimension: ClassificationDimension, id: string | null) => {
+      onUpdateClassification(threadRef, dimension, id);
+    },
+    [onUpdateClassification, threadRef],
+  );
   // While the snooze popover is open the pointer leaves the row, which
   // would fade the hover actions out from under the open menu; pin them.
   const [snoozeMenuOpenRaw, setSnoozeMenuOpen] = useState(false);
@@ -1379,6 +1418,15 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             {title}
             {pinIndicator}
             {terminalStatusIcon}
+            {/* Compact rows keep work type only — the one-line row can't fit
+                both chips; the full stage chip lives on the comfortable card. */}
+            <SidebarThreadClassificationBadges
+              workType={thread.workType}
+              stage={thread.stage}
+              taxonomy={props.harnessTaxonomy}
+              compact
+              onSelect={handleUpdateClassification}
+            />
             {isRegeneratingTitle ? (
               <span role="status" className="sr-only">
                 Regenerating title
@@ -1707,6 +1755,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
               ) : (
                 <span className="flex-1" />
               )}
+              <SidebarThreadClassificationBadges
+                workType={thread.workType}
+                stage={thread.stage}
+                taxonomy={props.harnessTaxonomy}
+                onSelect={handleUpdateClassification}
+              />
               {terminalStatusIcon}
               {prBadge}
               {diff ? (
@@ -1880,7 +1934,7 @@ export default function Sidebar() {
   const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
   const sidebarProjectSortOrder = useClientSettings((s) => s.sidebarProjectSortOrder);
   const sidebarDensity = useClientSettings((s) => s.sidebarDensity);
-  const groupThreadsByProject = useClientSettings((s) => s.sidebarGroupByProject);
+  const sidebarGroupBy = useClientSettings((s) => s.sidebarGroupBy);
   const timestampFormat = useClientSettings((s) => s.timestampFormat);
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const {
@@ -2433,16 +2487,44 @@ export default function Sidebar() {
     return routeThread === undefined ? [] : [routeThread];
   }, [routeThreadKey, snoozedShelfExpanded, snoozedThreads]);
 
-  // Group-by-project only reshuffles the ACTIVE section, and only into the
-  // project order the scope picker already uses. Null means "render the flat
-  // list", so the ungrouped path allocates nothing extra.
-  const activeThreadGroups = useMemo(
-    () =>
-      groupThreadsByProject
-        ? buildSidebarThreadGroups({ projects: projectGroups, threads: activeThreads })
-        : null,
-    [activeThreads, groupThreadsByProject, projectGroups],
-  );
+  // The active section can group by logical project or by a classification
+  // dimension (workType/stage). Taxonomy labels/colors come from the primary
+  // environment's effective vocabulary (falling back to the seed).
+  const groupingTaxonomy = useMemo(() => {
+    const config = primaryEnvironmentId ? serverConfigs.get(primaryEnvironmentId) : undefined;
+    return config?.harnessTaxonomy ?? DEFAULT_HARNESS_TAXONOMY;
+  }, [primaryEnvironmentId, serverConfigs]);
+  // Grouping only reshuffles the ACTIVE section. Null means "render the flat
+  // list", so the ungrouped path allocates nothing extra. Every group carries
+  // its own showProjectIdentity: project groups name the project (rows drop
+  // it, except the null "Other" bucket), taxonomy groups name the type (rows
+  // keep project identity).
+  const activeThreadGroups = useMemo<readonly SidebarActiveGroup[] | null>(() => {
+    if (sidebarGroupBy === "off") return null;
+    if (sidebarGroupBy === "project") {
+      return buildSidebarThreadGroups({ projects: projectGroups, threads: activeThreads }).map(
+        (group) => ({
+          key: group.key,
+          threads: group.threads,
+          showProjectIdentity: group.project === null,
+          header: { kind: "project", project: group.project },
+        }),
+      );
+    }
+    const dimension = sidebarGroupBy;
+    const entries = dimension === "workType" ? groupingTaxonomy.workTypes : groupingTaxonomy.stages;
+    return buildSidebarThreadGroupsByTaxonomy({
+      taxonomy: entries,
+      threads: activeThreads,
+      getValue: (thread) => (dimension === "workType" ? thread.workType : thread.stage),
+      unclassifiedLabel: "Unclassified",
+    }).map((group) => ({
+      key: group.key,
+      threads: group.threads,
+      showProjectIdentity: true,
+      header: { kind: "taxonomy", label: group.label, color: group.color, known: group.known },
+    }));
+  }, [activeThreads, groupingTaxonomy, projectGroups, sidebarGroupBy]);
   // Every keyboard affordance (jump shortcuts, shift-range select, prewarming)
   // indexes the list as RENDERED, so the flat order is derived from the same
   // plan the rows come from rather than from activeThreads directly.
@@ -2621,6 +2703,30 @@ export default function Sidebar() {
     setRenamingTitle(title);
   }, []);
   const cancelThreadRename = useCallback(() => setRenamingThreadKey(null), []);
+  const updateThreadClassification = useCallback(
+    (threadRef: ScopedThreadRef, dimension: ClassificationDimension, id: string | null) => {
+      void (async () => {
+        const result = await updateThreadMetadata({
+          environmentId: threadRef.environmentId,
+          input:
+            dimension === "workType"
+              ? { threadId: threadRef.threadId, workType: id }
+              : { threadId: threadRef.threadId, stage: id },
+        });
+        if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+          const error = squashAtomCommandFailure(result);
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: dimension === "workType" ? "Failed to set work type" : "Failed to set stage",
+              description: error instanceof Error ? error.message : "An error occurred.",
+            }),
+          );
+        }
+      })();
+    },
+    [updateThreadMetadata],
+  );
   const commitThreadRename = useCallback(
     (threadRef: ScopedThreadRef, title: string, originalTitle: string) => {
       void (async () => {
@@ -3310,6 +3416,13 @@ export default function Sidebar() {
                 titleRegeneration: supportsTitleRegeneration,
               },
               snoozePresets,
+              classification: {
+                taxonomy:
+                  serverConfigs.get(thread.environmentId)?.harnessTaxonomy ??
+                  DEFAULT_HARNESS_TAXONOMY,
+                workType: thread.workType ?? null,
+                stage: thread.stage ?? null,
+              },
             }),
             position,
           ),
@@ -3320,6 +3433,16 @@ export default function Sidebar() {
             (candidate) => `snooze:${candidate.id}` === clicked.value,
           );
           if (preset) attemptSnooze(threadRef, preset);
+          return;
+        }
+        if (clicked.value?.startsWith("set-work-type:")) {
+          const id = clicked.value.slice("set-work-type:".length);
+          updateThreadClassification(threadRef, "workType", id === "__clear__" ? null : id);
+          return;
+        }
+        if (clicked.value?.startsWith("set-stage:")) {
+          const id = clicked.value.slice("set-stage:".length);
+          updateThreadClassification(threadRef, "stage", id === "__clear__" ? null : id);
           return;
         }
         switch (clicked.value) {
@@ -3485,6 +3608,7 @@ export default function Sidebar() {
       projectCwdByKey,
       serverConfigs,
       startThreadRename,
+      updateThreadClassification,
       updateThreadMetadata,
       timestampFormat,
     ],
@@ -4034,6 +4158,11 @@ export default function Sidebar() {
                         onAcknowledgeWoke={acknowledgeWoke}
                         changeRequestSnapshot={changeRequestSnapshotByKey.get(threadKey) ?? null}
                         onChangeRequestSnapshot={setThreadChangeRequestSnapshot}
+                        harnessTaxonomy={
+                          serverConfigs.get(thread.environmentId)?.harnessTaxonomy ??
+                          DEFAULT_HARNESS_TAXONOMY
+                        }
+                        onUpdateClassification={updateThreadClassification}
                       />
                     );
                   };
@@ -4114,6 +4243,7 @@ export default function Sidebar() {
                     // need the same route-thread escape hatch the shelves
                     // carry, and grouping is about scanning, not hiding.
                     for (const group of activeThreadGroups) {
+                      const header = group.header;
                       items.push(
                         <li
                           key={`active-group:${group.key}`}
@@ -4121,21 +4251,43 @@ export default function Sidebar() {
                           className="list-none"
                         >
                           <div className="mb-1 mt-3 flex w-full items-center gap-2 px-2.5">
-                            {group.project ? (
-                              <ProjectFavicon
-                                environmentId={group.project.environmentId}
-                                cwd={group.project.workspaceRoot}
-                                faviconPath={group.project.faviconPath}
-                                className="size-4 shrink-0"
-                              />
+                            {header.kind === "project" ? (
+                              header.project ? (
+                                <ProjectFavicon
+                                  environmentId={header.project.environmentId}
+                                  cwd={header.project.workspaceRoot}
+                                  faviconPath={header.project.faviconPath}
+                                  className="size-4 shrink-0"
+                                />
+                              ) : (
+                                <FolderIcon
+                                  aria-hidden
+                                  className="size-4 shrink-0 text-muted-foreground/50"
+                                />
+                              )
                             ) : (
-                              <FolderIcon
+                              // Taxonomy color as a dot; unknown/unclassified
+                              // groups get a neutral swatch.
+                              <span
                                 aria-hidden
-                                className="size-4 shrink-0 text-muted-foreground/50"
+                                className={cn(
+                                  "size-2.5 shrink-0 rounded-full",
+                                  header.color === null && "bg-muted-foreground/40",
+                                )}
+                                style={header.color ? { backgroundColor: header.color } : undefined}
                               />
                             )}
-                            <span className="min-w-0 truncate text-xs font-medium text-secondary-label">
-                              {group.project?.displayName ?? "Other"}
+                            <span
+                              className={cn(
+                                "min-w-0 truncate text-xs font-medium",
+                                header.kind === "taxonomy" && !header.known
+                                  ? "text-muted-foreground/70"
+                                  : "text-secondary-label",
+                              )}
+                            >
+                              {header.kind === "project"
+                                ? (header.project?.displayName ?? "Other")
+                                : header.label}
                             </span>
                             <span className="shrink-0 text-xs text-muted-foreground/50 tabular-nums">
                               {group.threads.length}
@@ -4144,13 +4296,12 @@ export default function Sidebar() {
                           </div>
                         </li>,
                       );
-                      // Real project group → header carries identity, rows
-                      // drop it. Null-project "Other" group → header names
-                      // nothing, so rows keep favicon + title.
-                      const showProjectIdentity = group.project === null;
+                      // Project groups drop per-row identity (header names the
+                      // project), except the null "Other" bucket. Taxonomy
+                      // groups keep it (header names the type, not the project).
                       for (const thread of group.threads) {
                         items.push(
-                          renderThreadRow(thread, "active", undefined, showProjectIdentity),
+                          renderThreadRow(thread, "active", undefined, group.showProjectIdentity),
                         );
                       }
                     }

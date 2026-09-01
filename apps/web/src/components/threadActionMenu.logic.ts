@@ -1,10 +1,14 @@
-import type { ContextMenuItem } from "@t3tools/contracts";
+import type { ContextMenuItem, HarnessTaxonomy } from "@t3tools/contracts";
 import type { SnoozePreset } from "@t3tools/client-runtime/state/thread-settled";
+
+/** Sentinel appended to a classification value to clear the field. */
+export const CLASSIFICATION_CLEAR_VALUE = "__clear__";
 
 /**
  * Ids for the per-thread action menu. Snooze presets are dispatched as
- * `snooze:<presetId>` so the union stays closed while the preset list
- * remains data-driven.
+ * `snooze:<presetId>`, and classification picks as
+ * `set-work-type:<id>` / `set-stage:<id>` (with `__clear__` to unset), so the
+ * union stays closed while the option lists remain data-driven.
  */
 export type ThreadActionMenuId =
   | "new-thread-on-branch"
@@ -17,6 +21,10 @@ export type ThreadActionMenuId =
   | "unsnooze"
   | "rename"
   | "regenerate-title"
+  | "set-work-type"
+  | `set-work-type:${string}`
+  | "set-stage"
+  | `set-stage:${string}`
   | "mark-unread"
   | "copy"
   | "copy-path"
@@ -41,6 +49,45 @@ export interface ThreadActionMenuState {
     readonly titleRegeneration: boolean;
   };
   readonly snoozePresets: ReadonlyArray<SnoozePreset>;
+  /**
+   * Fork-local classification config for the "Set work type"/"Set stage"
+   * submenus. Absent on surfaces that don't offer classification (the menu
+   * simply omits those entries).
+   */
+  readonly classification?: {
+    readonly taxonomy: HarnessTaxonomy;
+    readonly workType: string | null;
+    readonly stage: string | null;
+  };
+}
+
+function buildClassificationMenuItem(input: {
+  readonly parentId: "set-work-type" | "set-stage";
+  readonly label: string;
+  readonly icon: string;
+  readonly entries: HarnessTaxonomy["workTypes"];
+  readonly current: string | null;
+}): ContextMenuItem<ThreadActionMenuId> {
+  const current = input.current?.trim() || null;
+  return {
+    id: input.parentId,
+    label: input.label,
+    icon: input.icon,
+    children: [
+      // ContextMenuItem has no checkbox affordance, so the active option is
+      // marked with a leading check in its label (native-menu convention).
+      ...input.entries.map((entry) => ({
+        id: `${input.parentId}:${entry.id}` as const,
+        label: entry.id === current ? `✓ ${entry.label}` : entry.label,
+      })),
+      {
+        id: `${input.parentId}:${CLASSIFICATION_CLEAR_VALUE}` as const,
+        label: "Clear",
+        separatorBefore: true,
+        disabled: current === null,
+      },
+    ],
+  };
 }
 
 /**
@@ -103,6 +150,26 @@ export function buildThreadActionMenuItems(
             icon: "refresh-cw",
             disabled: state.isRegeneratingTitle,
           },
+        ]
+      : []),
+    ...(state.classification
+      ? [
+          buildClassificationMenuItem({
+            parentId: "set-work-type",
+            label: "Set work type",
+            icon: "tag",
+            entries: state.classification.taxonomy.workTypes,
+            current: state.classification.workType,
+            // Stage submenu below reuses the same builder; the shared
+            // signature types entries as workTypes but the shape matches.
+          }),
+          buildClassificationMenuItem({
+            parentId: "set-stage",
+            label: "Set stage",
+            icon: "git-branch",
+            entries: state.classification.taxonomy.stages,
+            current: state.classification.stage,
+          }),
         ]
       : []),
     { id: "mark-unread", label: "Mark unread", icon: "mail-open" },

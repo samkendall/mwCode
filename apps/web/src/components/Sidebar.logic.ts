@@ -621,6 +621,121 @@ export function buildSidebarThreadGroups<
   return groups;
 }
 
+// Bucket key for active threads whose workType/stage is null, empty, or
+// whitespace-only when grouping the active section by a classification
+// dimension. Always sorts last, after every taxonomy and unknown-id group.
+export const SIDEBAR_UNCLASSIFIED_GROUP_KEY = "__unclassified__";
+
+/** One resolved classification chip: the taxonomy entry's label/color for a
+    known id, or the raw id (muted, no color) for an id the taxonomy no longer
+    lists. Null/empty values resolve to no badge at all. */
+export interface ClassificationBadgeModel {
+  readonly id: string;
+  readonly label: string;
+  readonly color: string | null;
+  /** False when the id is not in the taxonomy — render it muted as a raw id. */
+  readonly known: boolean;
+}
+
+type TaxonomyEntryLike = {
+  readonly id: string;
+  readonly label: string;
+  readonly color?: string | null | undefined;
+};
+
+/** Maps a thread's stored workType/stage id to its display chip. A present-but-
+    orphaned id (taxonomy renamed/removed it) still renders, as its raw id with
+    no color, so the thread never silently loses its classification. */
+export function resolveClassificationBadge(
+  entries: readonly TaxonomyEntryLike[],
+  value: string | null | undefined,
+): ClassificationBadgeModel | null {
+  if (value == null) return null;
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return null;
+  const entry = entries.find((candidate) => candidate.id === trimmed);
+  if (entry) {
+    return { id: trimmed, label: entry.label, color: entry.color ?? null, known: true };
+  }
+  return { id: trimmed, label: trimmed, color: null, known: false };
+}
+
+export interface SidebarTaxonomyThreadGroup<TThread> {
+  /** Taxonomy id, raw unknown id, or SIDEBAR_UNCLASSIFIED_GROUP_KEY. */
+  readonly key: string;
+  /** Header text: taxonomy label, raw id, or the unclassified label. */
+  readonly label: string;
+  /** Taxonomy color for a known id; null for unknown ids and the catch-all. */
+  readonly color: string | null;
+  /** False for unknown-id and unclassified groups so the header can mute them. */
+  readonly known: boolean;
+  readonly threads: readonly TThread[];
+}
+
+/**
+ * Groups already-ordered active threads by a classification dimension
+ * (`workType` or `stage`) for the sidebar's group-by-workType/stage modes.
+ * Group order is: every taxonomy entry that has threads, in taxonomy order;
+ * then ids the taxonomy no longer lists, in first-appearance order; then a
+ * single trailing "Unclassified" bucket for null/empty values. Thread order
+ * within each group is the caller's input order (sortThreadsForSidebar's
+ * static anchor ordering), so reading the result with flatMap yields the flat
+ * visual order keyboard navigation indexes by.
+ */
+export function buildSidebarThreadGroupsByTaxonomy<TThread>(input: {
+  taxonomy: readonly TaxonomyEntryLike[];
+  threads: readonly TThread[];
+  getValue: (thread: TThread) => string | null | undefined;
+  unclassifiedLabel: string;
+}): SidebarTaxonomyThreadGroup<TThread>[] {
+  const entryById = new Map(input.taxonomy.map((entry) => [entry.id, entry]));
+  // Insertion order = first-appearance order, which decides unknown-id groups.
+  const threadsByKey = new Map<string, TThread[]>();
+  for (const thread of input.threads) {
+    const raw = input.getValue(thread);
+    const trimmed = raw == null ? "" : raw.trim();
+    const key = trimmed.length === 0 ? SIDEBAR_UNCLASSIFIED_GROUP_KEY : trimmed;
+    const existing = threadsByKey.get(key);
+    if (existing) {
+      existing.push(thread);
+    } else {
+      threadsByKey.set(key, [thread]);
+    }
+  }
+
+  const groups: SidebarTaxonomyThreadGroup<TThread>[] = [];
+  // Known taxonomy entries first, in taxonomy order.
+  for (const entry of input.taxonomy) {
+    const threads = threadsByKey.get(entry.id);
+    if (threads === undefined) continue;
+    groups.push({
+      key: entry.id,
+      label: entry.label,
+      color: entry.color ?? null,
+      known: true,
+      threads,
+    });
+  }
+  // Unknown ids next, in first-appearance order.
+  for (const [key, threads] of threadsByKey) {
+    if (key === SIDEBAR_UNCLASSIFIED_GROUP_KEY) continue;
+    if (entryById.has(key)) continue;
+    groups.push({ key, label: key, color: null, known: false, threads });
+  }
+  // Unclassified always last.
+  const unclassified = threadsByKey.get(SIDEBAR_UNCLASSIFIED_GROUP_KEY);
+  if (unclassified !== undefined) {
+    groups.push({
+      key: SIDEBAR_UNCLASSIFIED_GROUP_KEY,
+      label: input.unclassifiedLabel,
+      color: null,
+      known: false,
+      threads: unclassified,
+    });
+  }
+  return groups;
+}
+
 // Pinned-reorder key math and the keyed sort live in client-runtime
 // (state/thread-sort) so web and mobile compute identical pinned orders.
 export {

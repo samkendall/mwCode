@@ -51,6 +51,12 @@ export const SidebarDensity = Schema.Literals(["comfortable", "compact"]);
 export type SidebarDensity = typeof SidebarDensity.Type;
 export const DEFAULT_SIDEBAR_DENSITY: SidebarDensity = "comfortable";
 
+// How the active section groups threads under headings: not at all, by logical
+// project, or by the thread's harness workType/stage classification.
+export const SidebarGroupBy = Schema.Literals(["off", "project", "workType", "stage"]);
+export type SidebarGroupBy = typeof SidebarGroupBy.Type;
+export const DEFAULT_SIDEBAR_GROUP_BY: SidebarGroupBy = "off";
+
 export const SidebarProjectGroupingMode = Schema.Literals([
   "repository",
   "repository_path",
@@ -273,9 +279,16 @@ export const ClientSettingsSchema = Schema.Struct({
   sidebarDensity: SidebarDensity.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_DENSITY)),
   ),
-  // Groups the ACTIVE section under a heading per logical project. Pinned,
-  // snoozed, and settled stay one flat list.
-  sidebarGroupByProject: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  // Groups the ACTIVE section under a heading — by logical project or by the
+  // thread's harness workType/stage. Pinned, snoozed, and settled stay one flat
+  // list. "off" disables grouping.
+  sidebarGroupBy: SidebarGroupBy.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_GROUP_BY)),
+  ),
+  // When on, the server auto-classifies a thread's workType/stage after the
+  // first turn (an explicit work-type in the prompt wins, else a small model
+  // call). A manual classification always wins over the auto one.
+  autoClassifyThreads: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   sidebarProjectGroupingMode: SidebarProjectGroupingMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_PROJECT_GROUPING_MODE)),
   ),
@@ -1001,7 +1014,8 @@ export const ClientSettingsPatch = Schema.Struct({
   sidebarAutoSettleAfterDays: Schema.optionalKey(Schema.NullOr(SidebarAutoSettleAfterDays)),
   sidebarAutoSettleOnMerge: Schema.optionalKey(Schema.Boolean),
   sidebarDensity: Schema.optionalKey(SidebarDensity),
-  sidebarGroupByProject: Schema.optionalKey(Schema.Boolean),
+  sidebarGroupBy: Schema.optionalKey(SidebarGroupBy),
+  autoClassifyThreads: Schema.optionalKey(Schema.Boolean),
   sidebarProjectGroupingMode: Schema.optionalKey(SidebarProjectGroupingMode),
   sidebarProjectGroupingOverrides: Schema.optionalKey(
     Schema.Record(TrimmedNonEmptyString, SidebarProjectGroupingMode),

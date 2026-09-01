@@ -34,6 +34,7 @@ import {
   MIN_PROMPT_FONT_SIZE,
   MIN_SIDEBAR_AUTO_SETTLE_AFTER_DAYS,
   MIN_TERMINAL_FONT_SIZE,
+  type SidebarGroupBy,
 } from "@t3tools/contracts/settings";
 import { resolveServerBackgroundActivitySettings } from "@t3tools/shared/backgroundActivitySettings";
 import { createModelSelection } from "@t3tools/shared/model";
@@ -168,6 +169,19 @@ const SIDEBAR_DENSITY_LABELS = {
   comfortable: "Comfortable",
   compact: "Compact",
 } as const;
+
+const SIDEBAR_GROUP_BY_LABELS: Record<SidebarGroupBy, string> = {
+  off: "Off",
+  project: "Project",
+  workType: "Work type",
+  stage: "Stage",
+};
+const SIDEBAR_GROUP_BY_OPTIONS: ReadonlyArray<SidebarGroupBy> = [
+  "off",
+  "project",
+  "workType",
+  "stage",
+];
 
 const BACKGROUND_ACTIVITY_PROFILE_LABELS: Record<BackgroundActivityProfile, string> = {
   balanced: "Balanced",
@@ -511,8 +525,8 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.sidebarDensity !== DEFAULT_UNIFIED_SETTINGS.sidebarDensity
         ? ["Sidebar density"]
         : []),
-      ...(settings.sidebarGroupByProject !== DEFAULT_UNIFIED_SETTINGS.sidebarGroupByProject
-        ? ["Group threads by project"]
+      ...(settings.sidebarGroupBy !== DEFAULT_UNIFIED_SETTINGS.sidebarGroupBy
+        ? ["Thread grouping"]
         : []),
       ...(settings.sidebarAutoSettleAfterDays !==
       DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays
@@ -599,7 +613,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.sidebarAutoSettleAfterDays,
       settings.sidebarAutoSettleOnMerge,
       settings.sidebarDensity,
-      settings.sidebarGroupByProject,
+      settings.sidebarGroupBy,
       settings.sidebarProjectGroupingMode,
       settings.sidebarThreadPreviewCount,
       settings.showSkillsInSlashMenu,
@@ -685,7 +699,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       glassOpacity: DEFAULT_UNIFIED_SETTINGS.glassOpacity,
       sidebarThreadPreviewCount: DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount,
       sidebarDensity: DEFAULT_UNIFIED_SETTINGS.sidebarDensity,
-      sidebarGroupByProject: DEFAULT_UNIFIED_SETTINGS.sidebarGroupByProject,
+      sidebarGroupBy: DEFAULT_UNIFIED_SETTINGS.sidebarGroupBy,
       sidebarProjectGroupingMode: DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode,
       sidebarAutoSettleAfterDays: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays,
       sidebarAutoSettleOnMerge: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge,
@@ -2017,28 +2031,40 @@ export function GeneralSettingsPanel() {
         />
 
         <SettingsRow
-          {...searchableSetting("group-threads-by-project")}
-          description="Put active threads under a heading for each project. Pinned, snoozed, and settled threads stay in one list."
+          {...searchableSetting("sidebar-grouping")}
+          description="Put active threads under a heading — by project, work type, or stage. Pinned, snoozed, and settled threads stay in one list."
           resetAction={
-            settings.sidebarGroupByProject !== DEFAULT_UNIFIED_SETTINGS.sidebarGroupByProject ? (
+            settings.sidebarGroupBy !== DEFAULT_UNIFIED_SETTINGS.sidebarGroupBy ? (
               <SettingResetButton
-                label="group threads by project"
+                label="thread grouping"
                 onClick={() =>
                   updateSettings({
-                    sidebarGroupByProject: DEFAULT_UNIFIED_SETTINGS.sidebarGroupByProject,
+                    sidebarGroupBy: DEFAULT_UNIFIED_SETTINGS.sidebarGroupBy,
                   })
                 }
               />
             ) : null
           }
           control={
-            <Switch
-              checked={settings.sidebarGroupByProject}
-              onCheckedChange={(checked) =>
-                updateSettings({ sidebarGroupByProject: Boolean(checked) })
-              }
-              aria-label="Group threads by project"
-            />
+            <Select
+              value={settings.sidebarGroupBy}
+              onValueChange={(value) => {
+                if (SIDEBAR_GROUP_BY_OPTIONS.includes(value as SidebarGroupBy)) {
+                  updateSettings({ sidebarGroupBy: value as SidebarGroupBy });
+                }
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-40" aria-label="Group threads by">
+                <SelectValue>{SIDEBAR_GROUP_BY_LABELS[settings.sidebarGroupBy]}</SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                {SIDEBAR_GROUP_BY_OPTIONS.map((option) => (
+                  <SelectItem hideIndicator key={option} value={option}>
+                    {SIDEBAR_GROUP_BY_LABELS[option]}
+                  </SelectItem>
+                ))}
+              </SelectPopup>
+            </Select>
           }
         />
 

@@ -95,4 +95,48 @@ describe("buildThreadActionMenuItems", () => {
     );
     expect(archiveItem?.disabled).toBe(true);
   });
+
+  it("omits the classification submenus when no taxonomy is provided", () => {
+    expect(allIds(baseState)).not.toContain("set-work-type");
+    expect(allIds(baseState)).not.toContain("set-stage");
+  });
+
+  it("offers work-type and stage submenus with a clear item and marks the current value", () => {
+    const items = buildThreadActionMenuItems({
+      ...baseState,
+      classification: {
+        taxonomy: {
+          workTypes: [
+            { id: "feature", label: "Feature" },
+            { id: "bug", label: "Bug" },
+          ],
+          stages: [{ id: "building", label: "Building" }],
+        },
+        workType: "bug",
+        stage: null,
+      },
+    });
+    const workType = items.find((item) => item.id === "set-work-type");
+    expect(workType?.children?.map((child) => child.id)).toEqual([
+      "set-work-type:feature",
+      "set-work-type:bug",
+      "set-work-type:__clear__",
+    ]);
+    // The active value carries a check; the rest do not.
+    expect(workType?.children?.find((child) => child.id === "set-work-type:bug")?.label).toBe(
+      "✓ Bug",
+    );
+    expect(workType?.children?.find((child) => child.id === "set-work-type:feature")?.label).toBe(
+      "Feature",
+    );
+    // Clear is disabled when the dimension is already unset (stage here).
+    const stage = items.find((item) => item.id === "set-stage");
+    expect(stage?.children?.find((child) => child.id === "set-stage:__clear__")?.disabled).toBe(
+      true,
+    );
+    // Clear is enabled when a value is set (work type here).
+    expect(
+      workType?.children?.find((child) => child.id === "set-work-type:__clear__")?.disabled,
+    ).toBe(false);
+  });
 });
