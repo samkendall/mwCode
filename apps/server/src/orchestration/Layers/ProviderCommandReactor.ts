@@ -961,10 +961,12 @@ const make = Effect.gen(function* () {
    * fills whatever the parse left open (and generally the stage). Every id is
    * validated against the effective taxonomy before it is persisted.
    *
-   * Overwrite guard: fields are re-read late and only filled when still null,
-   * so a manual classification — or an earlier auto one — is never clobbered.
-   * Stage re-assessment on later turns is intentionally out of scope (first
-   * turn only). Fails soft: any error is logged and the turn continues.
+   * Overwrite guard: the classify model call takes a second or two, and a user
+   * can set workType/stage by hand in that window. So the thread is read a
+   * second time AFTER the call and each field is dispatched only if it is still
+   * null then — a manual classification (or an earlier auto one) is never
+   * clobbered. Stage re-assessment on later turns is intentionally out of scope
+   * (first turn only). Fails soft: any error is logged and the turn continues.
    */
   const maybeClassifyThreadForFirstTurn = Effect.fn("maybeClassifyThreadForFirstTurn")(
     function* (input: {
@@ -1028,12 +1030,21 @@ const make = Effect.gen(function* () {
         const resolvedStage = needsStage ? resolveTaxonomyId(taxonomy.stages, modelStage) : null;
         if (resolvedWorkType === null && resolvedStage === null) return;
 
+        // Re-read the thread now that the (slow) model call has returned: a
+        // manual set during the call must win, so only fill a field still null.
+        const current = yield* resolveThread(input.threadId);
+        if (!current) return;
+        const workTypeToWrite =
+          resolvedWorkType !== null && current.workType == null ? resolvedWorkType : null;
+        const stageToWrite = resolvedStage !== null && current.stage == null ? resolvedStage : null;
+        if (workTypeToWrite === null && stageToWrite === null) return;
+
         yield* orchestrationEngine.dispatch({
           type: "thread.meta.update",
           commandId: yield* serverCommandId("thread-classify"),
           threadId: input.threadId,
-          ...(resolvedWorkType !== null ? { workType: resolvedWorkType } : {}),
-          ...(resolvedStage !== null ? { stage: resolvedStage } : {}),
+          ...(workTypeToWrite !== null ? { workType: workTypeToWrite } : {}),
+          ...(stageToWrite !== null ? { stage: stageToWrite } : {}),
         });
       }).pipe(
         Effect.catchCause((cause) =>

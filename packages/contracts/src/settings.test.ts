@@ -186,6 +186,28 @@ describe("ClientSettings sidebar", () => {
     expect(() => decodeClientSettings({ sidebarAutoSettleAfterDays: value })).toThrow();
     expect(() => decodeClientSettingsPatch({ sidebarAutoSettleAfterDays: value })).toThrow();
   });
+
+  it("defaults sidebar grouping to off", () => {
+    expect(decodeClientSettings({}).sidebarGroupBy).toBe("off");
+  });
+
+  it("promotes a legacy sidebarGroupByProject opt-in to project grouping", () => {
+    expect(decodeClientSettings({ sidebarGroupByProject: true }).sidebarGroupBy).toBe("project");
+    expect(decodeClientSettings({ sidebarGroupByProject: false }).sidebarGroupBy).toBe("off");
+  });
+
+  it("lets an explicit sidebarGroupBy win over the legacy key", () => {
+    expect(
+      decodeClientSettings({ sidebarGroupBy: "workType", sidebarGroupByProject: true })
+        .sidebarGroupBy,
+    ).toBe("workType");
+  });
+
+  it("does not re-expose the legacy sidebarGroupByProject key", () => {
+    expect(decodeClientSettings({ sidebarGroupByProject: true })).not.toHaveProperty(
+      "sidebarGroupByProject",
+    );
+  });
 });
 
 describe("ServerSettings.providerInstances (slice-2 invariant)", () => {

@@ -177,7 +177,7 @@ export const BrowserRecordingFrameRate = Schema.Literals(BROWSER_RECORDING_FRAME
 export type BrowserRecordingFrameRate = typeof BrowserRecordingFrameRate.Type;
 export const DEFAULT_BROWSER_RECORDING_FRAME_RATE: BrowserRecordingFrameRate = 30;
 
-export const ClientSettingsSchema = Schema.Struct({
+const ClientSettingsStruct = Schema.Struct({
   appearanceContrast: AppearanceContrast.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_APPEARANCE_CONTRAST)),
   ),
@@ -313,6 +313,36 @@ export const ClientSettingsSchema = Schema.Struct({
   ),
   wordWrap: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
 });
+
+/**
+ * Back-compat pre-decode: an older build persisted the sidebar grouping choice
+ * as a boolean `sidebarGroupByProject`. It was renamed to the wider
+ * `sidebarGroupBy` enum. Promote the legacy key (`true` → "project", anything
+ * else → "off") only when the new key is absent, so a stored opt-in survives
+ * the rename instead of silently resetting to "off". `sidebarGroupByProject` is
+ * legacy-read-only: it is never a live setting and is dropped once promoted.
+ */
+export const ClientSettingsSchema = Schema.Unknown.pipe(
+  Schema.decodeTo(
+    ClientSettingsStruct,
+    SchemaTransformation.transformOrFail({
+      decode: (raw) => {
+        if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+          return Effect.succeed(raw as typeof ClientSettingsStruct.Encoded);
+        }
+        const record = raw as Record<string, unknown>;
+        if ("sidebarGroupBy" in record || !("sidebarGroupByProject" in record)) {
+          return Effect.succeed(record as typeof ClientSettingsStruct.Encoded);
+        }
+        return Effect.succeed({
+          ...record,
+          sidebarGroupBy: record.sidebarGroupByProject === true ? "project" : "off",
+        } as typeof ClientSettingsStruct.Encoded);
+      },
+      encode: (value) => Effect.succeed(value as unknown),
+    }),
+  ),
+);
 export type ClientSettings = typeof ClientSettingsSchema.Type;
 
 export const DEFAULT_CLIENT_SETTINGS: ClientSettings = Schema.decodeSync(ClientSettingsSchema)({});

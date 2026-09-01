@@ -855,6 +855,34 @@ describe("ProviderCommandReactor", () => {
       expect(harness.classifyThread.mock.calls[0]?.[0].includeWorkType).toBe(false);
     });
 
+    it("does not overwrite a work type set manually during the model call", async () => {
+      const harness = await createHarness();
+      // Simulate the race: the thread's work type is null when the classifier
+      // reads it before the call, but the user sets it by hand while the
+      // (slow) model call is in flight. The classifier must not clobber it.
+      harness.classifyThread.mockReturnValue(
+        Effect.gen(function* () {
+          yield* harness.engine
+            .dispatch({
+              type: "thread.meta.update",
+              commandId: CommandId.make("cmd-manual-during-call"),
+              threadId: ThreadId.make("thread-1"),
+              workType: "cosmetic",
+            })
+            .pipe(Effect.orDie);
+          return { workType: "bug", stage: "building" };
+        }),
+      );
+
+      await startFirstTurn(harness, "The reconnect loop crashes after restart.");
+
+      await waitFor(async () => (await threadMeta(harness))?.stage === "building");
+      const thread = await threadMeta(harness);
+      // The manual set during the call survives; only the empty stage is filled.
+      expect(thread?.workType).toBe("cosmetic");
+      expect(thread?.stage).toBe("building");
+    });
+
     it("does not classify when autoClassifyThreads is disabled", async () => {
       const harness = await createHarness();
       harness.classifyThread.mockReturnValue(
