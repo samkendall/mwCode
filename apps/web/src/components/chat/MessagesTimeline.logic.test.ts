@@ -25,11 +25,13 @@ function subagentTimelineEntry(
   status: OrchestrationV2TurnItemStatus,
   subagentId = id,
   visibility: "local" | "inherited" = "local",
+  attempt?: NonNullable<TimelineEntry["attempt"]>,
 ): TimelineEntry {
   return {
     id,
     kind: "event",
     createdAt: "2026-08-29T00:00:00Z",
+    ...(attempt === undefined ? {} : { attempt }),
     projectedItem: {
       position: 0,
       visibility,
@@ -131,6 +133,56 @@ describe("collapseSubagentTimelineEntries", () => {
       agents: [{ id: "agent-local", status: "running" }],
     });
     expect(result.ctaByItemId.has("agent-inherited")).toBe(false);
+  });
+
+  it("keeps superseded and replacement attempts in separate rosters", () => {
+    const runId = "run-steered" as never;
+    const supersededAttempt = {
+      id: "attempt-1" as never,
+      runId,
+      attemptOrdinal: 1,
+      rootNodeId: "node-attempt-1" as never,
+      status: "superseded" as const,
+    };
+    const activeAttempt = {
+      id: "attempt-2" as never,
+      runId,
+      attemptOrdinal: 2,
+      rootNodeId: "node-attempt-2" as never,
+      status: "running" as const,
+    };
+    const entries: TimelineEntry[] = [
+      subagentTimelineEntry(
+        "old-agent-a",
+        runId,
+        "completed",
+        undefined,
+        "local",
+        supersededAttempt,
+      ),
+      subagentTimelineEntry(
+        "old-agent-b",
+        runId,
+        "completed",
+        undefined,
+        "local",
+        supersededAttempt,
+      ),
+      subagentTimelineEntry("new-agent", runId, "running", undefined, "local", activeAttempt),
+    ];
+
+    const result = collapseSubagentTimelineEntries(entries);
+
+    expect(result.timelineEntries.map((entry) => entry.id)).toEqual(["old-agent-a", "new-agent"]);
+    expect(result.ctaByItemId.get("old-agent-a")).toEqual({
+      agents: [
+        { id: "old-agent-a", status: "completed" },
+        { id: "old-agent-b", status: "completed" },
+      ],
+    });
+    expect(result.ctaByItemId.get("new-agent")).toEqual({
+      agents: [{ id: "new-agent", status: "running" }],
+    });
   });
 });
 

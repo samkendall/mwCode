@@ -226,7 +226,12 @@ export function collapseSubagentTimelineEntries(entries: ReadonlyArray<TimelineE
     }
 
     const item = entry.projectedItem.item;
-    const groupKey = item.runId === null ? `item:${item.id}` : `run:${item.runId}`;
+    const groupKey =
+      item.runId === null
+        ? `item:${item.id}`
+        : entry.attempt
+          ? `attempt:${entry.attempt.id}`
+          : `run:${item.runId}`;
     const existing = groupsByKey.get(groupKey);
     if (existing === undefined) {
       groupsByKey.set(groupKey, {
