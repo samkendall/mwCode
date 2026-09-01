@@ -31,7 +31,7 @@ import {
   scopedThreadKey,
 } from "@t3tools/client-runtime/environment";
 import type { ScopedThreadRef, ThreadId } from "@t3tools/contracts";
-import type { TimestampFormat } from "@t3tools/contracts/settings";
+import type { SidebarDensity, TimestampFormat } from "@t3tools/contracts/settings";
 import {
   AlarmClockIcon,
   AlarmClockOffIcon,
@@ -126,6 +126,7 @@ import { buildThreadActionMenuItems } from "./threadActionMenu.logic";
 import {
   animatePinnedLayoutChanges,
   buildBulkTitleRegenerationContextMenuItem,
+  buildSidebarThreadGroups,
   filterSidebarProjectScopeItems,
   formatWorkingDurationLabel,
   firstValidTimestampMs,
@@ -486,6 +487,9 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
   projectCwd: string | null;
   projectFaviconPath: string | null;
   isActive: boolean;
+  // Compact drafts collapse to the same one-line row as compact threads, so
+  // the block above the inbox doesn't stay tall while everything below shrinks.
+  density: SidebarDensity;
   onNavigate: (draftId: DraftId) => void;
   onDiscard: (draftId: DraftId) => void;
 }) {
@@ -526,6 +530,63 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
     },
     [draftId, onDiscard],
   );
+  const isCompact = props.density === "compact";
+  const discardButton = (
+    <span className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-end">
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <button
+              type="button"
+              aria-label="Discard draft"
+              onClick={handleDiscard}
+              className="pointer-events-none inline-flex cursor-pointer items-center rounded-md bg-transparent px-1 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/sidebar-row:pointer-events-auto group-hover/sidebar-row:opacity-100"
+            >
+              <XIcon className="size-3" />
+            </button>
+          }
+        />
+        <TooltipPopup side="top">Discard draft</TooltipPopup>
+      </Tooltip>
+    </span>
+  );
+  if (isCompact) {
+    // One line, same height as a compact thread row: the prompt preview is
+    // what identifies a draft, and the favicon carries the project the way it
+    // does on a compact thread row.
+    return (
+      <li className="list-none">
+        <div
+          role="button"
+          tabIndex={0}
+          data-testid="sidebar-draft-row"
+          className={cn(
+            "group/sidebar-row relative flex h-9 w-full cursor-pointer items-center gap-2.5 overflow-hidden rounded-md px-2.5 text-left text-sidebar-foreground outline-none select-none",
+            props.isActive
+              ? "bg-sidebar-row-active"
+              : "bg-amber-400/[0.04] hover:bg-amber-400/[0.08]",
+          )}
+          onClick={handleActivate}
+          onKeyDown={handleKeyDown}
+        >
+          <SquarePenIcon
+            aria-hidden
+            className="size-3 shrink-0 text-amber-600 dark:text-amber-300/80"
+          />
+          <ProjectFavicon
+            environmentId={session.environmentId}
+            cwd={props.projectCwd ?? ""}
+            faviconPath={props.projectFaviconPath}
+            className="size-4 shrink-0"
+          />
+          <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground/90">
+            {preview}
+          </span>
+          {discardButton}
+        </div>
+      </li>
+    );
+  }
   return (
     <li className="list-none py-0.5">
       <div
@@ -556,23 +617,7 @@ const SidebarDraftRow = memo(function SidebarDraftRow(props: {
             <span className="min-w-0 flex-1 truncate text-xs font-medium text-secondary-label">
               {props.projectTitle}
             </span>
-            <span className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-end">
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <button
-                      type="button"
-                      aria-label="Discard draft"
-                      onClick={handleDiscard}
-                      className="pointer-events-none inline-flex cursor-pointer items-center rounded-md bg-transparent px-1 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:pointer-events-auto focus-visible:opacity-100 group-hover/sidebar-row:pointer-events-auto group-hover/sidebar-row:opacity-100"
-                    >
-                      <XIcon className="size-3" />
-                    </button>
-                  }
-                />
-                <TooltipPopup side="top">Discard draft</TooltipPopup>
-              </Tooltip>
-            </span>
+            {discardButton}
           </div>
           <div className="mt-0.5 truncate text-sm font-medium text-foreground/90">{preview}</div>
         </div>
@@ -597,6 +642,7 @@ const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
   projectFaviconPathByKey: ReadonlyMap<string, string | null | undefined>;
   scopedProjectKeys: ReadonlySet<string> | null;
   routeDraftId: string | null;
+  density: SidebarDensity;
   onNavigateToDraft: (draftId: DraftId) => void;
 }) {
   const draftThreadsByThreadKey = useComposerDraftStore((store) => store.draftThreadsByThreadKey);
@@ -692,6 +738,7 @@ const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
             projectCwd={props.projectCwdByKey.get(projectKey) ?? null}
             projectFaviconPath={props.projectFaviconPathByKey.get(projectKey) ?? null}
             isActive={draftId === props.routeDraftId}
+            density={props.density}
             onNavigate={props.onNavigateToDraft}
             onDiscard={handleDiscard}
           />
@@ -722,6 +769,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   // rows. The marker can unpin the thread when the server supports pinning.
   pinningSupported: boolean;
   isPinned: boolean;
+  // False while the row sits under a project group header: the header already
+  // names the project, so the row drops its favicon and project label.
+  showProjectIdentity: boolean;
   // Present only on pinned cards whose server supports reordering: dnd-kit
   // sortable bag applied to the card root so the whole card drags (the
   // pointer sensor's distance constraint keeps plain clicks working).
@@ -1155,7 +1205,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       className={cn(
         "min-w-0 flex-1 text-sm transition-opacity motion-reduce:transition-none",
         shouldRecede ? "font-normal" : "font-medium",
-        variant === "card"
+        // Live rows keep the card's contrast whether they render as a card or,
+        // at compact density, as a slim row. Only the settled and snoozed
+        // tails get the receded treatment.
+        variant === "card" || variantAction === "settle"
           ? cn(
               "truncate",
               isUnread || isWoke
@@ -1243,10 +1296,26 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   ) : null;
 
   if (variant === "slim") {
+    // The sortable bag reaches slim rows too: at compact density pinned rows
+    // render slim, and dragging must keep working there.
+    const slimSortable = props.sortable;
     return (
       <li
         data-thread-item
-        className="list-none [content-visibility:auto] [contain-intrinsic-size:auto_34px]"
+        ref={slimSortable?.setNodeRef}
+        style={
+          slimSortable
+            ? {
+                transform: CSS.Translate.toString(slimSortable.transform),
+                transition: slimSortable.transition,
+              }
+            : undefined
+        }
+        {...(slimSortable?.listeners ?? {})}
+        className={cn(
+          "list-none [content-visibility:auto] [contain-intrinsic-size:auto_34px]",
+          slimSortable?.isDragging && "z-20 opacity-80",
+        )}
       >
         <Tooltip>
           <TooltipTrigger
@@ -1266,27 +1335,47 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
           >
             {/* Settled history recedes: dimmed favicon at rest, restored on
               hover so the tail stays scannable when you're hunting. */}
-            <span
-              className={cn(
-                "shrink-0 transition-opacity",
-                !props.isActive &&
-                  "opacity-40 grayscale group-hover/sidebar-row:opacity-100 group-hover/sidebar-row:grayscale-0",
-              )}
-            >
-              <ProjectFavicon
-                environmentId={thread.environmentId}
-                cwd={props.projectCwd ?? ""}
-                faviconPath={props.projectFaviconPath}
-                className="size-4"
-                fallbackIcon={MessageSquareIcon}
-              />
-            </span>
+            {props.showProjectIdentity ? (
+              <span
+                className={cn(
+                  "shrink-0 transition-opacity",
+                  !props.isActive &&
+                    "opacity-40 grayscale group-hover/sidebar-row:opacity-100 group-hover/sidebar-row:grayscale-0",
+                )}
+              >
+                <ProjectFavicon
+                  environmentId={thread.environmentId}
+                  cwd={props.projectCwd ?? ""}
+                  faviconPath={props.projectFaviconPath}
+                  className="size-4"
+                  fallbackIcon={MessageSquareIcon}
+                />
+              </span>
+            ) : null}
             {title}
             {pinIndicator}
             {terminalStatusIcon}
             {isRegeneratingTitle ? (
               <span role="status" className="sr-only">
                 Regenerating title
+              </span>
+            ) : null}
+            {/* Compact rows drop the branch line the card carries, so the
+              provider glyph moves up here — it is the one identity cue that
+              can't be recovered from the title. Settled and snoozed rows are
+              history and keep their leaner layout. */}
+            {variantAction === "settle" && driverKind ? (
+              <span className="inline-flex shrink-0 items-center">
+                <ProviderInstanceIcon
+                  driverKind={driverKind}
+                  displayName={
+                    providerEntry?.displayName ?? thread.session?.providerName ?? modelInstanceId
+                  }
+                  accentColor={providerEntry?.accentColor}
+                  showBadge={showInstanceBadge}
+                  iconClassName="size-3.5 opacity-60"
+                  badgeClassName="right-[-0.1875rem] bottom-[-0.1875rem] h-3 min-w-3 px-0.5 text-[7px]"
+                />
               </span>
             ) : null}
             {/* The PR badge stays outside the hover-fading slot: it must
@@ -1325,6 +1414,25 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                     />
                     <TooltipPopup side="top">Dismiss Woke notification</TooltipPopup>
                   </Tooltip>
+                ) : variantAction === "settle" && topStatus ? (
+                  // Compact live rows trade the timestamp for the status the
+                  // card shows on its top line — "Working" is the reason the
+                  // row is here, and the time is recoverable from the tooltip.
+                  // No elapsed duration: a per-second ticker on every row is
+                  // the exact repaint cost compact density is meant to avoid.
+                  <span
+                    className={cn(
+                      "inline-flex items-center gap-1 text-xs font-medium",
+                      topStatus.className,
+                    )}
+                  >
+                    {topStatus.icon === "working" ? (
+                      <CircleDashedIcon aria-hidden className="size-3.5 shrink-0" />
+                    ) : topStatus.icon === "done" ? (
+                      <CircleCheckIcon aria-hidden className="size-3.5 shrink-0" />
+                    ) : null}
+                    <span role="status">{topStatus.label}</span>
+                  </span>
                 ) : (
                   <span className="text-xs">
                     {variantAction === "unsettle"
@@ -1427,13 +1535,15 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
         >
           <div className="relative z-10 h-[4.875rem] px-[var(--sidebar-row-content-inset)] py-[var(--sidebar-content-inset)]">
             <div className="flex h-5 min-w-0 items-center gap-1.5">
-              <ProjectFavicon
-                environmentId={thread.environmentId}
-                cwd={props.projectCwd ?? ""}
-                faviconPath={props.projectFaviconPath}
-                className="size-4 shrink-0"
-              />
-              {props.projectTitle ? (
+              {props.showProjectIdentity ? (
+                <ProjectFavicon
+                  environmentId={thread.environmentId}
+                  cwd={props.projectCwd ?? ""}
+                  faviconPath={props.projectFaviconPath}
+                  className="size-4 shrink-0"
+                />
+              ) : null}
+              {props.showProjectIdentity && props.projectTitle ? (
                 <span
                   className={cn(
                     "min-w-0 flex-1 truncate text-secondary-label text-xs",
@@ -1745,6 +1855,8 @@ export default function Sidebar() {
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
   const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
   const sidebarProjectSortOrder = useClientSettings((s) => s.sidebarProjectSortOrder);
+  const sidebarDensity = useClientSettings((s) => s.sidebarDensity);
+  const groupThreadsByProject = useClientSettings((s) => s.sidebarGroupByProject);
   const timestampFormat = useClientSettings((s) => s.timestampFormat);
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const {
@@ -2297,9 +2409,34 @@ export default function Sidebar() {
     return routeThread === undefined ? [] : [routeThread];
   }, [routeThreadKey, snoozedShelfExpanded, snoozedThreads]);
 
+  // Group-by-project only reshuffles the ACTIVE section, and only into the
+  // project order the scope picker already uses. Null means "render the flat
+  // list", so the ungrouped path allocates nothing extra.
+  const activeThreadGroups = useMemo(
+    () =>
+      groupThreadsByProject
+        ? buildSidebarThreadGroups({ projects: projectGroups, threads: activeThreads })
+        : null,
+    [activeThreads, groupThreadsByProject, projectGroups],
+  );
+  // Every keyboard affordance (jump shortcuts, shift-range select, prewarming)
+  // indexes the list as RENDERED, so the flat order is derived from the same
+  // plan the rows come from rather than from activeThreads directly.
+  const orderedActiveThreads = useMemo(
+    () =>
+      activeThreadGroups === null
+        ? activeThreads
+        : activeThreadGroups.flatMap((group) => group.threads),
+    [activeThreadGroups, activeThreads],
+  );
   const orderedThreads = useMemo(
-    () => [...pinnedThreads, ...activeThreads, ...visibleSnoozedThreads, ...renderedSettledThreads],
-    [pinnedThreads, activeThreads, visibleSnoozedThreads, renderedSettledThreads],
+    () => [
+      ...pinnedThreads,
+      ...orderedActiveThreads,
+      ...visibleSnoozedThreads,
+      ...renderedSettledThreads,
+    ],
+    [pinnedThreads, orderedActiveThreads, visibleSnoozedThreads, renderedSettledThreads],
   );
   const orderedThreadKeys = useMemo(
     () =>
@@ -3760,11 +3897,15 @@ export default function Sidebar() {
                     const threadKey = scopedThreadKey(
                       scopeThreadRef(thread.environmentId, thread.id),
                     );
-                    // Settled and snoozed are the ONLY things that collapse a
-                    // row: every other thread is a full card. Density comes
-                    // from users (or the auto rules) actually parking work,
-                    // not from the sidebar second-guessing what still matters.
-                    const isCard = section === "active" || section === "pinned";
+                    // At comfortable density, settled and snoozed are the ONLY
+                    // things that collapse a row: every other thread is a full
+                    // card, and density comes from users (or the auto rules)
+                    // actually parking work rather than the sidebar
+                    // second-guessing what still matters. Compact density is
+                    // the user overriding that: every section goes one-line.
+                    const isCard =
+                      sidebarDensity !== "compact" &&
+                      (section === "active" || section === "pinned");
                     const rowVariant = isCard ? "card" : "slim";
                     return (
                       <SidebarThreadRow
@@ -3801,6 +3942,9 @@ export default function Sidebar() {
                             .threadPinning === true
                         }
                         isPinned={thread.pinnedAt != null}
+                        // Grouped active rows sit under a header that already
+                        // names (and shows the favicon for) their project.
+                        showProjectIdentity={activeThreadGroups === null || section !== "active"}
                         sortable={sortable}
                         snoozeWakeLabelText={
                           section === "snoozed" && thread.snoozedUntil != null
@@ -3874,6 +4018,7 @@ export default function Sidebar() {
                       projectFaviconPathByKey={projectFaviconPathByKey}
                       scopedProjectKeys={scopedProjectKeys}
                       routeDraftId={routeDraftIdForRows}
+                      density={sidebarDensity}
                       onNavigateToDraft={navigateToDraft}
                     />,
                     pinnedThreads.length > 0 ? (
@@ -3926,8 +4071,49 @@ export default function Sidebar() {
                       />,
                     );
                   }
-                  for (const thread of activeThreads) {
-                    items.push(renderThreadRow(thread, "active"));
+                  if (activeThreadGroups === null) {
+                    for (const thread of activeThreads) {
+                      items.push(renderThreadRow(thread, "active"));
+                    }
+                  } else {
+                    // Static labels, not toggles: a collapsible group would
+                    // need the same route-thread escape hatch the shelves
+                    // carry, and grouping is about scanning, not hiding.
+                    for (const group of activeThreadGroups) {
+                      items.push(
+                        <li
+                          key={`active-group:${group.key}`}
+                          data-thread-selection-safe
+                          className="list-none"
+                        >
+                          <div className="mb-1 mt-3 flex w-full items-center gap-2 px-2.5">
+                            {group.project ? (
+                              <ProjectFavicon
+                                environmentId={group.project.environmentId}
+                                cwd={group.project.workspaceRoot}
+                                faviconPath={group.project.faviconPath}
+                                className="size-4 shrink-0"
+                              />
+                            ) : (
+                              <FolderIcon
+                                aria-hidden
+                                className="size-4 shrink-0 text-muted-foreground/50"
+                              />
+                            )}
+                            <span className="min-w-0 truncate text-xs font-medium text-secondary-label">
+                              {group.project?.displayName ?? "Other"}
+                            </span>
+                            <span className="shrink-0 text-xs text-muted-foreground/50 tabular-nums">
+                              {group.threads.length}
+                            </span>
+                            <span className="h-px flex-1 bg-sidebar-border/60" />
+                          </div>
+                        </li>,
+                      );
+                      for (const thread of group.threads) {
+                        items.push(renderThreadRow(thread, "active"));
+                      }
+                    }
                   }
                   // Snoozed shelf: between the inbox and Settled — out of the
                   // way, never gone. The header always renders while anything

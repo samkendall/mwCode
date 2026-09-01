@@ -144,6 +144,18 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["combine matching repositories environments sidebar"],
   },
   {
+    id: "sidebar-density",
+    title: "Sidebar density",
+    to: "/settings/general",
+    searchTerms: ["compact comfortable single line rows thread list height"],
+  },
+  {
+    id: "group-threads-by-project",
+    title: "Group threads by project",
+    to: "/settings/general",
+    searchTerms: ["sidebar headings sections per project active threads"],
+  },
+  {
     id: "auto-settle-inactive-threads",
     title: "Auto-settle inactive threads",
     to: "/settings/general",

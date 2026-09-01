@@ -25,6 +25,20 @@ If reordering is unavailable for one environment, update the T3 Code server runn
 environment. Older servers can still pin and unpin threads, but do not understand synced ordering;
 their pinned threads keep the default newest-first order below the ones you have arranged.
 
+## Density and grouping
+
+Set **Settings → General → Sidebar density** to **Compact** to put every sidebar thread on a
+single line, including pinned, active, and draft rows. A compact row keeps the title, the status
+(Working, Approval, Input, Done), the pull request badge, and the provider icon; the project name
+and branch move to the row's hover card. **Comfortable** is the default and keeps the taller cards
+for pinned and active threads.
+
+Turn on **Settings → General → Group threads by project** to put your active threads under a
+heading for each project, with the project's icon and how many threads it holds. Repositories that
+you have open in more than one environment appear under a single heading. Pinned, snoozed, and
+settled threads stay in one list, and thread order inside a group is unchanged. Keyboard jump
+shortcuts follow the list as you see it.
+
 ## Environment artwork
 
 Dev and Nightly environments can identify themselves with artwork at the top of the sidebar and in

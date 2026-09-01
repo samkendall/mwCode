@@ -42,6 +42,8 @@ const clientSettings: ClientSettings = {
   providerModelPreferences: {},
   sidebarAutoSettleAfterDays: 3,
   sidebarAutoSettleOnMerge: true,
+  sidebarDensity: "compact",
+  sidebarGroupByProject: true,
   sidebarProjectGroupingMode: "repository_path",
   sidebarProjectGroupingOverrides: {
     "environment-1:/tmp/project-a": "separate",

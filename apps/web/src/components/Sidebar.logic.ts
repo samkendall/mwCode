@@ -552,6 +552,75 @@ export function sortThreadsForSidebar<
   );
 }
 
+/** Bucket key for threads whose project isn't in the logical project list
+    (an environment that dropped offline mid-render, a project removed while
+    its threads are still streaming). The rows stay reachable instead of
+    disappearing from the list. */
+export const SIDEBAR_UNGROUPED_THREADS_KEY = "__ungrouped__";
+
+export interface SidebarThreadGroup<TProject, TThread> {
+  readonly key: string;
+  /** null for the trailing catch-all group. */
+  readonly project: TProject | null;
+  readonly threads: readonly TThread[];
+}
+
+/**
+ * Groups already-ordered active threads under their logical project, for the
+ * sidebar's "group by project" mode. Both orders come from the caller and are
+ * preserved verbatim: `projects` decides group order (sortLogicalProjectsForSidebar)
+ * and the thread order within each group is the input order
+ * (sortThreadsForSidebar's static anchor ordering). Empty groups are dropped,
+ * so a project only appears while it has visible work. Reading the result with
+ * flatMap gives the flat visual order the keyboard navigation indexes by.
+ */
+export function buildSidebarThreadGroups<
+  TProject extends {
+    readonly projectKey: string;
+    readonly memberProjectRefs: readonly {
+      readonly environmentId: string;
+      readonly projectId: string;
+    }[];
+  },
+  TThread extends { readonly environmentId: string; readonly projectId: string },
+>(input: {
+  projects: readonly TProject[];
+  threads: readonly TThread[];
+}): SidebarThreadGroup<TProject, TThread>[] {
+  const projectKeyByRef = new Map<string, string>();
+  for (const project of input.projects) {
+    for (const projectRef of project.memberProjectRefs) {
+      projectKeyByRef.set(
+        `${projectRef.environmentId}\0${projectRef.projectId}`,
+        project.projectKey,
+      );
+    }
+  }
+  const threadsByProjectKey = new Map<string, TThread[]>();
+  for (const thread of input.threads) {
+    const projectKey =
+      projectKeyByRef.get(`${thread.environmentId}\0${thread.projectId}`) ??
+      SIDEBAR_UNGROUPED_THREADS_KEY;
+    const existing = threadsByProjectKey.get(projectKey);
+    if (existing) {
+      existing.push(thread);
+    } else {
+      threadsByProjectKey.set(projectKey, [thread]);
+    }
+  }
+  const groups: SidebarThreadGroup<TProject, TThread>[] = [];
+  for (const project of input.projects) {
+    const threads = threadsByProjectKey.get(project.projectKey);
+    if (threads === undefined) continue;
+    groups.push({ key: project.projectKey, project, threads });
+  }
+  const ungrouped = threadsByProjectKey.get(SIDEBAR_UNGROUPED_THREADS_KEY);
+  if (ungrouped !== undefined) {
+    groups.push({ key: SIDEBAR_UNGROUPED_THREADS_KEY, project: null, threads: ungrouped });
+  }
+  return groups;
+}
+
 // Pinned-reorder key math and the keyed sort live in client-runtime
 // (state/thread-sort) so web and mobile compute identical pinned orders.
 export {

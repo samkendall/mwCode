@@ -164,6 +164,11 @@ const TRANSCRIPT_AUTO_COLLAPSE_LABELS = {
   never: "Never",
 } as const;
 
+const SIDEBAR_DENSITY_LABELS = {
+  comfortable: "Comfortable",
+  compact: "Compact",
+} as const;
+
 const BACKGROUND_ACTIVITY_PROFILE_LABELS: Record<BackgroundActivityProfile, string> = {
   balanced: "Balanced",
   performance: "Performance",
@@ -503,6 +508,12 @@ export function useSettingsRestore(onRestored?: () => void) {
       DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode
         ? ["Project Grouping"]
         : []),
+      ...(settings.sidebarDensity !== DEFAULT_UNIFIED_SETTINGS.sidebarDensity
+        ? ["Sidebar density"]
+        : []),
+      ...(settings.sidebarGroupByProject !== DEFAULT_UNIFIED_SETTINGS.sidebarGroupByProject
+        ? ["Group threads by project"]
+        : []),
       ...(settings.sidebarAutoSettleAfterDays !==
       DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays
         ? ["Auto-settle inactive threads"]
@@ -587,6 +598,8 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.enableProviderUpdateChecks,
       settings.sidebarAutoSettleAfterDays,
       settings.sidebarAutoSettleOnMerge,
+      settings.sidebarDensity,
+      settings.sidebarGroupByProject,
       settings.sidebarProjectGroupingMode,
       settings.sidebarThreadPreviewCount,
       settings.showSkillsInSlashMenu,
@@ -671,6 +684,8 @@ export function useSettingsRestore(onRestored?: () => void) {
       environmentIdentificationMode: DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode,
       glassOpacity: DEFAULT_UNIFIED_SETTINGS.glassOpacity,
       sidebarThreadPreviewCount: DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount,
+      sidebarDensity: DEFAULT_UNIFIED_SETTINGS.sidebarDensity,
+      sidebarGroupByProject: DEFAULT_UNIFIED_SETTINGS.sidebarGroupByProject,
       sidebarProjectGroupingMode: DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode,
       sidebarAutoSettleAfterDays: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays,
       sidebarAutoSettleOnMerge: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge,
@@ -1960,6 +1975,69 @@ export function GeneralSettingsPanel() {
                 });
               }}
               aria-label="Project grouping"
+            />
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("sidebar-density")}
+          description="Compact puts every sidebar thread on a single line."
+          resetAction={
+            settings.sidebarDensity !== DEFAULT_UNIFIED_SETTINGS.sidebarDensity ? (
+              <SettingResetButton
+                label="sidebar density"
+                onClick={() =>
+                  updateSettings({ sidebarDensity: DEFAULT_UNIFIED_SETTINGS.sidebarDensity })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={settings.sidebarDensity}
+              onValueChange={(value) => {
+                if (value === "comfortable" || value === "compact") {
+                  updateSettings({ sidebarDensity: value });
+                }
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-40" aria-label="Sidebar density">
+                <SelectValue>{SIDEBAR_DENSITY_LABELS[settings.sidebarDensity]}</SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="comfortable">
+                  {SIDEBAR_DENSITY_LABELS.comfortable}
+                </SelectItem>
+                <SelectItem hideIndicator value="compact">
+                  {SIDEBAR_DENSITY_LABELS.compact}
+                </SelectItem>
+              </SelectPopup>
+            </Select>
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("group-threads-by-project")}
+          description="Put active threads under a heading for each project. Pinned, snoozed, and settled threads stay in one list."
+          resetAction={
+            settings.sidebarGroupByProject !== DEFAULT_UNIFIED_SETTINGS.sidebarGroupByProject ? (
+              <SettingResetButton
+                label="group threads by project"
+                onClick={() =>
+                  updateSettings({
+                    sidebarGroupByProject: DEFAULT_UNIFIED_SETTINGS.sidebarGroupByProject,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.sidebarGroupByProject}
+              onCheckedChange={(checked) =>
+                updateSettings({ sidebarGroupByProject: Boolean(checked) })
+              }
+              aria-label="Group threads by project"
             />
           }
         />

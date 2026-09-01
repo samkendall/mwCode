@@ -5,6 +5,7 @@ import {
   archiveSelectedThreadEntries,
   buildBulkTitleRegenerationContextMenuItem,
   buildMultiSelectThreadContextMenuItems,
+  buildSidebarThreadGroups,
   createThreadJumpHintVisibilityController,
   filterSidebarProjectScopeItems,
   getSidebarThreadIdsToPrewarm,
@@ -37,6 +38,7 @@ import {
   sortProjectsForSidebar,
   sortScopedProjectsForSidebar,
   shouldCreateNewThreadInCurrentProject,
+  SIDEBAR_UNGROUPED_THREADS_KEY,
   THREAD_JUMP_HINT_SHOW_DELAY_MS,
 } from "./Sidebar.logic";
 import {
@@ -859,6 +861,97 @@ describe("sortThreadsForSidebar", () => {
     ]);
 
     expect(sorted.map((thread) => thread.id)).toEqual(["newest", "stale-stamp"]);
+  });
+});
+
+describe("buildSidebarThreadGroups", () => {
+  const project = (projectKey: string, refs: ReadonlyArray<[string, string]>) => ({
+    projectKey,
+    memberProjectRefs: refs.map(([environmentId, projectId]) => ({ environmentId, projectId })),
+  });
+  const thread = (id: string, environmentId: string, projectId: string) => ({
+    id,
+    environmentId,
+    projectId,
+  });
+
+  it("emits groups in project order and keeps the given thread order inside each", () => {
+    const groups = buildSidebarThreadGroups({
+      projects: [
+        project("beta", [["env-1", "project-beta"]]),
+        project("alpha", [["env-1", "project-alpha"]]),
+      ],
+      threads: [
+        thread("alpha-newest", "env-1", "project-alpha"),
+        thread("beta-newest", "env-1", "project-beta"),
+        thread("alpha-oldest", "env-1", "project-alpha"),
+      ],
+    });
+
+    expect(groups.map((group) => group.key)).toEqual(["beta", "alpha"]);
+    expect(groups.map((group) => group.threads.map((entry) => entry.id))).toEqual([
+      ["beta-newest"],
+      ["alpha-newest", "alpha-oldest"],
+    ]);
+    // The flat read is what the keyboard jump shortcuts index by.
+    expect(groups.flatMap((group) => group.threads).map((entry) => entry.id)).toEqual([
+      "beta-newest",
+      "alpha-newest",
+      "alpha-oldest",
+    ]);
+  });
+
+  it("drops projects with no visible threads", () => {
+    const groups = buildSidebarThreadGroups({
+      projects: [
+        project("empty", [["env-1", "project-empty"]]),
+        project("busy", [["env-1", "project-busy"]]),
+      ],
+      threads: [thread("only", "env-1", "project-busy")],
+    });
+
+    expect(groups.map((group) => group.key)).toEqual(["busy"]);
+  });
+
+  it("collapses the same logical project across environments into one group", () => {
+    const groups = buildSidebarThreadGroups({
+      projects: [
+        project("shared", [
+          ["env-local", "project-local"],
+          ["env-remote", "project-remote"],
+        ]),
+      ],
+      threads: [
+        thread("local", "env-local", "project-local"),
+        thread("remote", "env-remote", "project-remote"),
+      ],
+    });
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0]?.threads.map((entry) => entry.id)).toEqual(["local", "remote"]);
+  });
+
+  it("collects threads with an unknown project into a trailing headerless group", () => {
+    const groups = buildSidebarThreadGroups({
+      projects: [project("known", [["env-1", "project-known"]])],
+      threads: [
+        thread("orphan", "env-1", "project-gone"),
+        thread("known", "env-1", "project-known"),
+      ],
+    });
+
+    expect(groups.map((group) => group.key)).toEqual(["known", SIDEBAR_UNGROUPED_THREADS_KEY]);
+    expect(groups.at(-1)?.project).toBeNull();
+    expect(groups.at(-1)?.threads.map((entry) => entry.id)).toEqual(["orphan"]);
+  });
+
+  it("returns no groups when nothing is visible", () => {
+    expect(
+      buildSidebarThreadGroups({
+        projects: [project("known", [["env-1", "project-known"]])],
+        threads: [],
+      }),
+    ).toEqual([]);
   });
 });
 
