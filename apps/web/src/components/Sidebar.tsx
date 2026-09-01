@@ -218,6 +218,21 @@ import {
   type DraftSessionState,
 } from "../composerDraftStore";
 
+// The provider avatar already identifies the vendor, so a leading brand word on
+// the model label is redundant in the sidebar ("Claude Opus 4.8" -> "Opus 4.8").
+// Requires a trailing space so hyphenated model lines (e.g. "GPT-5") are left
+// intact, and never strips down to an empty label.
+const REDUNDANT_MODEL_BRAND_PREFIXES = ["Claude", "Anthropic"] as const;
+function stripRedundantModelBrand(label: string): string {
+  for (const brand of REDUNDANT_MODEL_BRAND_PREFIXES) {
+    const prefix = `${brand.toLowerCase()} `;
+    if (label.length > prefix.length && label.slice(0, prefix.length).toLowerCase() === prefix) {
+      return label.slice(prefix.length).trimStart();
+    }
+  }
+  return label;
+}
+
 // Settled-tail paging: recent history is the common lookup; the deep tail
 // stays behind an explicit Show more.
 const SETTLED_TAIL_INITIAL_COUNT = 10;
@@ -1153,7 +1168,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     (model) => model.slug === thread.modelSelection.model,
   );
   const modelLabel = selectedModel
-    ? getTriggerDisplayModelLabel(selectedModel)
+    ? stripRedundantModelBrand(getTriggerDisplayModelLabel(selectedModel))
     : thread.modelSelection.model;
 
   const isRemote =
@@ -2097,7 +2112,7 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
     (model) => model.slug === thread.modelSelection.model,
   );
   const modelLabel = selectedModel
-    ? getTriggerDisplayModelLabel(selectedModel)
+    ? stripRedundantModelBrand(getTriggerDisplayModelLabel(selectedModel))
     : thread.modelSelection.model;
   const runningTerminalIds = useThreadRunningTerminalIds({
     environmentId: thread.environmentId,
