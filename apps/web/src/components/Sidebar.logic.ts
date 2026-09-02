@@ -1033,6 +1033,24 @@ export function formatWorkingDurationLabel(elapsedMs: number): string {
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
+// Which source owns a thread row's line-1 status slot. Live turn work (working,
+// monitoring, approval, input, failed, freshly-woke) always wins so in-flight
+// work is never hidden; a linked PR's review/merge state comes next, promoting
+// "Awaiting review" / "Ready to merge" / "Merged" over a bare "Done"; the
+// unread-completion "Done" is last, and "none" leaves the relative time.
+export type TopLineStatusSource = "live" | "pr" | "done" | "none";
+
+export function resolveTopLineStatusSource(input: {
+  hasLiveStatus: boolean;
+  hasPrReviewStatus: boolean;
+  hasUnreadCompletion: boolean;
+}): TopLineStatusSource {
+  if (input.hasLiveStatus) return "live";
+  if (input.hasPrReviewStatus) return "pr";
+  if (input.hasUnreadCompletion) return "done";
+  return "none";
+}
+
 export function resolveThreadStatusPill(input: {
   thread: ThreadStatusInput;
 }): ThreadStatusPill | null {

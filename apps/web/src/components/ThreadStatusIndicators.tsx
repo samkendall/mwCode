@@ -159,6 +159,44 @@ export function prBadgePresentation(
   return prBadge("pending", "Open");
 }
 
+export interface PrReviewRowStatus {
+  /** The word the row's line-1 status slot shows, e.g. "Awaiting review". */
+  readonly label: string;
+  readonly tone: PrBadgeTone;
+  /** Static text color shared with the badge so the two never disagree. */
+  readonly colorClass: string;
+}
+
+// The row status spells the PR state in words, coarser than the badge's own
+// label. Only these three badge labels get re-worded for the row; every other
+// badge label (Merged, Changes requested, Checks failing, Merge conflicts,
+// Draft, Auto-merge armed, Closed) reads the same in both places.
+const PR_REVIEW_ROW_LABEL: Record<string, string> = {
+  Approved: "Ready to merge",
+  "Review required": "Awaiting review",
+  Open: "Awaiting review",
+};
+
+/**
+ * The PR review/merge state to promote into a thread row's line-1 status slot,
+ * derived from the SAME `prBadgePresentation` mapping the badge uses so the two
+ * can never disagree on tone. `null` only when the thread has no PR at all.
+ * Open PRs read "Awaiting review" / "Changes requested" / "Ready to merge";
+ * terminal PRs read "Merged" / "Closed".
+ */
+export function resolvePrReviewStatus(
+  pr: ThreadPr,
+  signals?: PrBadgeReviewSignals,
+): PrReviewRowStatus | null {
+  if (!pr) return null;
+  const presentation = prBadgePresentation(pr.state, signals);
+  return {
+    label: PR_REVIEW_ROW_LABEL[presentation.statusLabel] ?? presentation.statusLabel,
+    tone: presentation.tone,
+    colorClass: presentation.colorClass,
+  };
+}
+
 export function useLinkedThreadPullRequest(
   environmentId: EnvironmentId | null,
   linkedPullRequest: ThreadLinkedPullRequest | null | undefined,

@@ -12,6 +12,7 @@ import {
   prStatusIndicator,
   resolveDisplayedThreadPr,
   resolveDisplayedThreadPrProvider,
+  resolvePrReviewStatus,
   resolveThreadPr,
   rollupPrChecksState,
   settledPrHoverColorClass,
@@ -722,6 +723,62 @@ describe("prBadgePresentation", () => {
         reviewDecision: "changes-requested",
       }),
     ).toMatchObject({ tone: "attention", statusLabel: "Changes requested" });
+  });
+});
+
+describe("resolvePrReviewStatus", () => {
+  const openPr = (): NonNullable<VcsStatusResult["pr"]> => ({
+    ...mergedFeaturePr(),
+    state: "open",
+  });
+
+  it("returns null when there is no PR", () => {
+    expect(resolvePrReviewStatus(null)).toBeNull();
+  });
+
+  it("reads a merged PR as Merged in violet", () => {
+    const result = resolvePrReviewStatus(mergedFeaturePr());
+    expect(result).toMatchObject({ label: "Merged", tone: "merged" });
+    expect(result?.colorClass).toContain("text-violet-600");
+  });
+
+  it("reads a closed-unmerged PR as Closed in red, distinct from merged", () => {
+    const result = resolvePrReviewStatus({ ...mergedFeaturePr(), state: "closed" });
+    expect(result).toMatchObject({ label: "Closed", tone: "closed" });
+    expect(result?.colorClass).toContain("text-red-600");
+  });
+
+  it("reads changes-requested as Changes requested in red", () => {
+    const result = resolvePrReviewStatus(openPr(), { reviewDecision: "changes-requested" });
+    expect(result).toMatchObject({ label: "Changes requested", tone: "attention" });
+    expect(result?.colorClass).toContain("text-red-600");
+  });
+
+  it("reads an approved PR as Ready to merge in green", () => {
+    const result = resolvePrReviewStatus(openPr(), { reviewDecision: "approved" });
+    expect(result).toMatchObject({ label: "Ready to merge", tone: "ready" });
+    expect(result?.colorClass).toContain("text-emerald-600");
+  });
+
+  it("reads a review-required PR as Awaiting review", () => {
+    expect(resolvePrReviewStatus(openPr(), { reviewDecision: "review-required" })).toMatchObject({
+      label: "Awaiting review",
+      tone: "pending",
+    });
+  });
+
+  it("reads an open PR with no decision yet as Awaiting review", () => {
+    expect(resolvePrReviewStatus(openPr())).toMatchObject({
+      label: "Awaiting review",
+      tone: "pending",
+    });
+  });
+
+  it("shares the badge's tone so status and badge never disagree", () => {
+    const signals = { mergeability: "conflicting" as const };
+    expect(resolvePrReviewStatus(openPr(), signals)?.tone).toBe(
+      prBadgePresentation("open", signals).tone,
+    );
   });
 });
 

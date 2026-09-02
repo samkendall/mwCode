@@ -147,6 +147,7 @@ import {
   resolveProjectEffectiveSort,
   resolveSettledTimestamp,
   resolveSidebarThreadStatus,
+  resolveTopLineStatusSource,
   searchSidebarThreadsByTitle,
   shouldCreateNewThreadInCurrentProject,
   resolveWorkingStartedAt,
@@ -165,6 +166,7 @@ import {
   nextThreadChangeRequestSnapshot,
   prBadgePresentation,
   prStatusIndicator,
+  resolvePrReviewStatus,
   resolveDisplayedThreadPr,
   resolveDisplayedThreadPrProvider,
   setThreadChangeRequestSnapshot,
@@ -1054,10 +1056,20 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     status === "working" || status === "monitoring" || status === "approval" || status === "input";
   const shouldRecede =
     (status === "ready" || isInFlight) && !isUnread && !isWoke && !props.isActive && !isSelected;
+  // The linked PR's review/merge verdict, distilled from the detail the row
+  // already polls (no extra fetch). Promoted into line 1's status slot for
+  // shipped work, so a settled session reads "Awaiting review" / "Ready to
+  // merge" / "Merged" instead of a bare "Done". The signals only sharpen the
+  // live linked PR — a cached snapshot leaves them undefined and it degrades
+  // to state-only wording.
+  const prReviewStatus = resolvePrReviewStatus(
+    pr,
+    pr === linkedPullRequestStatus?.pr ? linkedPullRequestStatus.signals : undefined,
+  );
   // Status hues follow the system-wide convention set by sidebar v1 and the
   // mobile Live Activity/widgets (amber approval, indigo input, sky working)
   // so a thread reads the same color everywhere it surfaces.
-  const topStatus =
+  const liveTopStatus =
     status === "working"
       ? {
           label: "Working",
@@ -1101,13 +1113,27 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                     icon: "woke" as const,
                     className: "text-amber-700 dark:text-amber-300",
                   }
-                : isUnread
-                  ? {
-                      label: "Done",
-                      icon: "done" as const,
-                      className: "text-emerald-700 dark:text-emerald-300",
-                    }
-                  : null;
+                : null;
+  // Precedence: live turn work never yields (don't hide in-flight work), then
+  // the PR review status (the new behavior — it replaces a bare "Done"/time for
+  // shipped work), then the unread "Done", then the relative time.
+  const topLineStatusSource = resolveTopLineStatusSource({
+    hasLiveStatus: liveTopStatus !== null,
+    hasPrReviewStatus: prReviewStatus !== null,
+    hasUnreadCompletion: isUnread,
+  });
+  const topStatus =
+    topLineStatusSource === "live"
+      ? liveTopStatus
+      : topLineStatusSource === "pr" && prReviewStatus !== null
+        ? { label: prReviewStatus.label, icon: null, className: prReviewStatus.colorClass }
+        : topLineStatusSource === "done"
+          ? {
+              label: "Done",
+              icon: "done" as const,
+              className: "text-emerald-700 dark:text-emerald-300",
+            }
+          : null;
   const isWokeStatus = topStatus?.icon === "woke";
 
   const branchMismatch = resolveLocalCheckoutBranchMismatch({

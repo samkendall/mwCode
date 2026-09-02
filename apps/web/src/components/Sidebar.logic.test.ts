@@ -32,6 +32,7 @@ import {
   resolveThreadRowClassName,
   resolveSidebarThreadStatus,
   resolveThreadStatusPill,
+  resolveTopLineStatusSource,
   resolveWorkingStartedAt,
   searchSidebarThreadsByTitle,
   formatWorkingDurationLabel,
@@ -1651,6 +1652,48 @@ describe("formatWorkingDurationLabel", () => {
   it("clamps negative and non-finite elapsed values to zero", () => {
     expect(formatWorkingDurationLabel(-5_000)).toBe("0s");
     expect(formatWorkingDurationLabel(Number.NaN)).toBe("0s");
+  });
+});
+
+describe("resolveTopLineStatusSource", () => {
+  it("lets live turn work win over a PR status and unread completion", () => {
+    expect(
+      resolveTopLineStatusSource({
+        hasLiveStatus: true,
+        hasPrReviewStatus: true,
+        hasUnreadCompletion: true,
+      }),
+    ).toBe("live");
+  });
+
+  it("shows the PR status over an unread completion when no live work", () => {
+    expect(
+      resolveTopLineStatusSource({
+        hasLiveStatus: false,
+        hasPrReviewStatus: true,
+        hasUnreadCompletion: true,
+      }),
+    ).toBe("pr");
+  });
+
+  it("falls back to the unread Done when there is no live work or PR", () => {
+    expect(
+      resolveTopLineStatusSource({
+        hasLiveStatus: false,
+        hasPrReviewStatus: false,
+        hasUnreadCompletion: true,
+      }),
+    ).toBe("done");
+  });
+
+  it("shows nothing (the relative time) when idle", () => {
+    expect(
+      resolveTopLineStatusSource({
+        hasLiveStatus: false,
+        hasPrReviewStatus: false,
+        hasUnreadCompletion: false,
+      }),
+    ).toBe("none");
   });
 });
 
