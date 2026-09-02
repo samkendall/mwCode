@@ -36,6 +36,7 @@ import {
   extractPullRequestReference,
   resolveLinkedRepository,
 } from "../../pullRequestReference.ts";
+import { repositoryIdentityOf } from "../../pullRequest/PullRequestService.ts";
 import { increment, orchestrationEventsProcessedTotal } from "../../observability/Metrics.ts";
 import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
 import type { ProviderServiceError } from "../../provider/Errors.ts";
@@ -308,6 +309,30 @@ function buildGeneratedWorktreeBranchName(raw: string): string {
 
   const safeFragment = branchFragment.length > 0 ? branchFragment : "update";
   return `${WORKTREE_BRANCH_PREFIX}/${safeFragment}`;
+}
+
+// Tool/command activity kinds whose output can carry a PR URL the agent never
+// repeats in its reply — a `gh pr create` result line is recorded as a tool
+// result, not as message text. `tool.completed` is the terminal activity that
+// carries the full command stdout; scanning it (rather than the noisy in-flight
+// `tool.updated` stream) keeps the auto-link cheap.
+const PULL_REQUEST_SCAN_ACTIVITY_KINDS: ReadonlyArray<string> = ["tool.completed"];
+
+// Flattened, scannable text for one activity: its summary plus a JSON dump of
+// the payload, so extractPullRequestReference's URL regex finds a PR URL
+// wherever a provider stashed it (command output, result content, raw stdout).
+// Fail-soft: an unstringifiable payload contributes just the summary.
+function pullRequestScanTextForActivity(activity: {
+  readonly summary: string;
+  readonly payload: unknown;
+}): string {
+  let payloadText = "";
+  try {
+    payloadText = JSON.stringify(activity.payload) ?? "";
+  } catch {
+    payloadText = "";
+  }
+  return `${activity.summary}\n${payloadText}`;
 }
 
 const make = Effect.gen(function* () {
@@ -1203,9 +1228,11 @@ const make = Effect.gen(function* () {
    * Auto-detect a pull request the session already surfaced and link it to the
    * thread, so a user who never uses T3 Code's own PR-linking UI still gets the
    * PR-detail poll, review decision and "Has a PR" sort. The agent typically
-   * runs `gh pr create` (whose result line is the bare URL) or writes the URL
-   * into its reply, so a pure text scan of the conversation is enough — no model
-   * call. Runs every turn until a link is set, then no-ops.
+   * runs `gh pr create` (whose result line is the bare URL, recorded as a
+   * tool/command activity — NOT message text — and often not repeated in the
+   * reply) or writes the URL into its reply. So the scan covers both message
+   * text AND tool/command activity output, in chronological order, with no
+   * model call. Runs every turn until a link is set, then no-ops.
    *
    * Guards:
    *   - Overwrite guard: an already-linked thread is left alone (a manual or
@@ -1224,26 +1251,46 @@ const make = Effect.gen(function* () {
     "maybeLinkThreadPullRequestFromConversation",
   )(function* (input: { readonly threadId: ThreadId }) {
     yield* Effect.gen(function* () {
-      const thread = yield* resolveThread(input.threadId);
+      // Read messages AND tool/command activities: the primary source — a `gh
+      // pr create` result line — is a tool activity, not message text.
+      const thread = yield* projectionSnapshotQuery
+        .getThreadDetailById(input.threadId, { activityKinds: PULL_REQUEST_SCAN_ACTIVITY_KINDS })
+        .pipe(Effect.map(Option.getOrUndefined));
       // Overwrite guard: an existing link (manual or earlier auto) always wins.
       if (!thread || thread.linkedPullRequest != null) {
         return;
       }
 
-      // Scan the whole conversation in order so the LAST URL — the most recent
-      // PR the session named — is the one linked. Assistant replies carry the
-      // `gh pr create` result and any PR URL the agent wrote.
-      const conversation = thread.messages.map((entry) => entry.text).join("\n");
+      // Merge messages and tool/command output into one chronological stream so
+      // the LAST URL — the most recent PR the session named — is the one linked,
+      // whichever source carries it. extractPullRequestReference keeps the last
+      // match, so ordering by time (sequence as the intra-timestamp tiebreak)
+      // makes "last URL wins" hold across both sources.
+      const scanEntries = [
+        ...thread.messages.map((entry) => ({
+          createdAt: entry.createdAt,
+          sequence: -1,
+          text: entry.text,
+        })),
+        ...thread.activities.map((activity) => ({
+          createdAt: activity.createdAt,
+          sequence: activity.sequence ?? -1,
+          text: pullRequestScanTextForActivity(activity),
+        })),
+      ].toSorted(
+        (left, right) =>
+          left.createdAt.localeCompare(right.createdAt) || left.sequence - right.sequence,
+      );
+      const conversation = scanEntries.map((entry) => entry.text).join("\n");
       const detected = extractPullRequestReference(conversation);
       if (detected === null) {
         return;
       }
 
       const project = yield* resolveProject(thread.projectId);
-      const identity = project?.repositoryIdentity ?? null;
-      const projectRepository =
-        identity?.displayName ??
-        (identity?.owner && identity.name ? `${identity.owner}/${identity.name}` : null);
+      // Shared with the manual-link/PR-list path (handles the azure-devops case
+      // too) so the stored repository spelling can't drift between them.
+      const projectRepository = project ? repositoryIdentityOf(project) : null;
       // Repo guard: a known project repo must match; an unknown one is allowed.
       const repository = resolveLinkedRepository(detected.repository, projectRepository);
       if (repository === null) {

@@ -1035,10 +1035,15 @@ export function formatWorkingDurationLabel(elapsedMs: number): string {
 
 // Which source owns a thread row's line-1 status slot. Live turn work (working,
 // monitoring, approval, input, failed, freshly-woke) always wins so in-flight
-// work is never hidden; a linked PR's review/merge state comes next, promoting
-// "Awaiting review" / "Ready to merge" / "Merged" over a bare "Done"; the
-// unread-completion "Done" is last, and "none" leaves the relative time.
-export type TopLineStatusSource = "live" | "pr" | "done" | "none";
+// work is never hidden. A fresh, unread "Done" comes next: a just-finished turn
+// must still flag its completion, so it outranks the PR state — otherwise a
+// PR-linked thread that just finished would show "Awaiting review" and lose the
+// fresh-completion cue. "Done" here is the UNREAD-completion case only
+// (hasUnseenCompletion: the turn completed after the last visit), so it is
+// transient — once the row is read/idle it clears and the PR's review/merge
+// state ("Awaiting review" / "Ready to merge" / "Merged") becomes the resting
+// status. "none" leaves the relative time.
+export type TopLineStatusSource = "live" | "done" | "pr" | "none";
 
 export function resolveTopLineStatusSource(input: {
   hasLiveStatus: boolean;
@@ -1046,8 +1051,8 @@ export function resolveTopLineStatusSource(input: {
   hasUnreadCompletion: boolean;
 }): TopLineStatusSource {
   if (input.hasLiveStatus) return "live";
-  if (input.hasPrReviewStatus) return "pr";
   if (input.hasUnreadCompletion) return "done";
+  if (input.hasPrReviewStatus) return "pr";
   return "none";
 }
 

@@ -1114,9 +1114,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                     className: "text-amber-700 dark:text-amber-300",
                   }
                 : null;
-  // Precedence: live turn work never yields (don't hide in-flight work), then
-  // the PR review status (the new behavior — it replaces a bare "Done"/time for
-  // shipped work), then the unread "Done", then the relative time.
+  // Precedence: live turn work never yields (don't hide in-flight work), then a
+  // fresh unread "Done" (a just-finished turn must still flag its completion,
+  // even on a PR-linked thread), then the PR review status (the resting status
+  // once the completion is read — "Awaiting review" / "Ready to merge" /
+  // "Merged" for shipped work), then the relative time.
   const topLineStatusSource = resolveTopLineStatusSource({
     hasLiveStatus: liveTopStatus !== null,
     hasPrReviewStatus: prReviewStatus !== null,
@@ -1125,14 +1127,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   const topStatus =
     topLineStatusSource === "live"
       ? liveTopStatus
-      : topLineStatusSource === "pr" && prReviewStatus !== null
-        ? { label: prReviewStatus.label, icon: null, className: prReviewStatus.colorClass }
-        : topLineStatusSource === "done"
-          ? {
-              label: "Done",
-              icon: "done" as const,
-              className: "text-emerald-700 dark:text-emerald-300",
-            }
+      : topLineStatusSource === "done"
+        ? {
+            label: "Done",
+            icon: "done" as const,
+            className: "text-emerald-700 dark:text-emerald-300",
+          }
+        : topLineStatusSource === "pr" && prReviewStatus !== null
+          ? { label: prReviewStatus.label, icon: null, className: prReviewStatus.colorClass }
           : null;
   const isWokeStatus = topStatus?.icon === "woke";
 
@@ -1626,10 +1628,15 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                     />
                     <TooltipPopup side="top">Dismiss Woke notification</TooltipPopup>
                   </Tooltip>
-                ) : variantAction === "settle" && topStatus ? (
-                  // Compact live rows trade the timestamp for the status the
-                  // card shows on its top line — "Working" is the reason the
+                ) : variantAction === "settle" && topStatus && topLineStatusSource !== "pr" ? (
+                  // Compact live/done rows trade the timestamp for the status
+                  // the card shows on its top line — "Working" is the reason the
                   // row is here, and the time is recoverable from the tooltip.
+                  // A PR review status is the exception: it is permanent once a
+                  // thread is linked, so evicting the time forever would leave
+                  // the one-line row with no time at all. The prBadge already
+                  // carries the PR and its state color, so the row keeps the
+                  // timestamp and lets the badge stand in for the status word.
                   // No elapsed duration: a per-second ticker on every row is
                   // the exact repaint cost compact density is meant to avoid.
                   <span
@@ -2050,9 +2057,17 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                 </span>
               ) : null}
               {/* Model name (carrying the provider) + remote marker; the avatar
-                  glyph that used to sit here just repeated the model text. */}
+                  glyph that used to sit here just repeated the model text. The
+                  relative time joins them only when a status took line 1's slot
+                  (the same fallback the cozy row uses), so a PR-status row — now
+                  a permanent line-1 status — never loses its last-activity time. */}
               <span className="ml-auto inline-flex shrink-0 items-center gap-1.5">
                 {providerIdentityCluster}
+                {topStatus ? (
+                  <span className="tabular-nums text-secondary-label">
+                    {threadTimeLabel(thread)}
+                  </span>
+                ) : null}
               </span>
             </div>
           </div>

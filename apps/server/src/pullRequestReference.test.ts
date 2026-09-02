@@ -57,10 +57,17 @@ describe("extractPullRequestReference", () => {
     );
   });
 
-  it("recognises a GitHub Enterprise host", () => {
-    const ref = extractPullRequestReference("https://github.acme.com/owner/repo/pull/8");
-    expect(ref?.host).toBe("github.acme.com");
+  it("recognises a github.com subdomain such as www", () => {
+    const ref = extractPullRequestReference("https://www.github.com/owner/repo/pull/8");
+    expect(ref?.host).toBe("www.github.com");
     expect(ref?.number).toBe(8);
+  });
+
+  it("rejects a lookalike host that merely starts with github.", () => {
+    // github.evil.com is not github.com; a `github.` prefix match would be a
+    // dangerous false positive. GitHub Enterprise (arbitrary customer domains)
+    // is unsupported for now for the same reason.
+    expect(extractPullRequestReference("https://github.evil.com/owner/repo/pull/1")).toBeNull();
   });
 
   it("ignores an issues URL", () => {

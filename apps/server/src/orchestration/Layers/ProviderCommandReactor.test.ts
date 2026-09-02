@@ -1255,6 +1255,52 @@ describe("ProviderCommandReactor", () => {
       });
     });
 
+    it("links a pull request URL that appears only in tool/command activity output", async () => {
+      const harness = await createHarness();
+
+      // The `gh pr create` result line lands as a tool.completed activity, not
+      // as message text, and the agent's reply below never repeats the URL — so
+      // scanning message text alone would miss exactly this case.
+      await harness.runEffect(
+        harness.engine.dispatch({
+          type: "thread.activity.append",
+          commandId: CommandId.make("cmd-gh-pr-create-activity"),
+          threadId: ThreadId.make("thread-1"),
+          activity: {
+            id: EventId.make("activity-gh-pr-create"),
+            tone: "tool",
+            kind: "tool.completed",
+            summary: "gh pr create",
+            payload: {
+              data: {
+                command: "gh pr create --fill",
+                rawOutput: { content: "https://github.com/owner/repo/pull/777" },
+              },
+            },
+            turnId: null,
+            createdAt: now,
+          },
+          createdAt: now,
+        }),
+      );
+      await waitFor(async () => {
+        const readModel = await harness.readModel();
+        const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+        return thread?.activities.some((activity) => activity.kind === "tool.completed") === true;
+      });
+
+      await startTurn(harness, "All done — merged the branch and cleaned everything up.");
+
+      await waitFor(async () => (await linkedPr(harness)) != null);
+      const pr = await linkedPr(harness);
+      expect(pr).toEqual({
+        projectId: asProjectId("project-1"),
+        repository: "owner/repo",
+        number: 777,
+        url: "https://github.com/owner/repo/pull/777",
+      });
+    });
+
     it("does not overwrite an existing linked pull request", async () => {
       const harness = await createHarness();
       await harness.runEffect(

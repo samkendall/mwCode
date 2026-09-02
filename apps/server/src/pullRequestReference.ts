@@ -9,9 +9,12 @@
  * review decision with no other change.
  *
  * Deliberately conservative:
- *   - Only GitHub (github.com, an Enterprise install, a `github.*` host) is in
- *     scope for v1. GitLab / Bitbucket / Azure are left out; the caller only
- *     needs GitHub today and a wrong host is worse than no match.
+ *   - Only github.com (and its subdomains, e.g. `www.github.com`) is in scope
+ *     for v1. GitLab / Bitbucket / Azure are left out; the caller only needs
+ *     GitHub today and a wrong host is worse than no match. GitHub Enterprise
+ *     uses arbitrary customer domains we cannot infer from spelling, so it is
+ *     unsupported for now rather than guessed at (a `github.<x>` prefix would
+ *     also match lookalikes like `github.evil.com`).
  *   - Only the `/pull/<n>` shape counts. `/issues/<n>`, `/commit/<sha>`,
  *     `/pulls`, a repository root and the rest are ignored because they carry
  *     no PR the poll could read.
@@ -31,11 +34,12 @@ export interface PullRequestReference {
   readonly url: string;
 }
 
-/** GitHub itself, one of its subdomains, or an Enterprise install named for it. */
+/** github.com itself, or one of its subdomains (e.g. `www.github.com`). A
+    lookalike like `github.evil.com` is rejected — matching by a `github.`
+    prefix would accept it. Enterprise installs are out of scope (see module
+    doc). */
 function isGitHubHost(hostname: string): boolean {
-  return (
-    hostname === "github.com" || hostname.endsWith(".github.com") || hostname.startsWith("github.")
-  );
+  return hostname === "github.com" || hostname.endsWith(".github.com");
 }
 
 // URLs in prose and tool output run until whitespace or a delimiter that cannot

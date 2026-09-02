@@ -1666,12 +1666,22 @@ describe("resolveTopLineStatusSource", () => {
     ).toBe("live");
   });
 
-  it("shows the PR status over an unread completion when no live work", () => {
+  it("lets a fresh unread Done win over a PR status so a just-finished turn still flags Done", () => {
     expect(
       resolveTopLineStatusSource({
         hasLiveStatus: false,
         hasPrReviewStatus: true,
         hasUnreadCompletion: true,
+      }),
+    ).toBe("done");
+  });
+
+  it("shows the PR status once the completion is read (idle, PR-linked)", () => {
+    expect(
+      resolveTopLineStatusSource({
+        hasLiveStatus: false,
+        hasPrReviewStatus: true,
+        hasUnreadCompletion: false,
       }),
     ).toBe("pr");
   });
