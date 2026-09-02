@@ -32,6 +32,10 @@ import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
 import { ServerConfig } from "../../config.ts";
 import { loadGlobalHarnessTaxonomy, resolveProjectHarnessTaxonomy } from "../../harnessTaxonomy.ts";
 import { parseExplicitWorkType, resolveTaxonomyId } from "../../harnessClassification.ts";
+import {
+  extractPullRequestReference,
+  resolveLinkedRepository,
+} from "../../pullRequestReference.ts";
 import { increment, orchestrationEventsProcessedTotal } from "../../observability/Metrics.ts";
 import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
 import type { ProviderServiceError } from "../../provider/Errors.ts";
@@ -1195,6 +1199,85 @@ const make = Effect.gen(function* () {
     );
   });
 
+  /**
+   * Auto-detect a pull request the session already surfaced and link it to the
+   * thread, so a user who never uses T3 Code's own PR-linking UI still gets the
+   * PR-detail poll, review decision and "Has a PR" sort. The agent typically
+   * runs `gh pr create` (whose result line is the bare URL) or writes the URL
+   * into its reply, so a pure text scan of the conversation is enough — no model
+   * call. Runs every turn until a link is set, then no-ops.
+   *
+   * Guards:
+   *   - Overwrite guard: an already-linked thread is left alone (a manual or
+   *     earlier auto link wins). The thread is re-read right before writing, the
+   *     way the classifier re-reads, so a link set mid-scan is never clobbered.
+   *   - Repo guard: when the project's repository identity is known, the
+   *     detected repository must match it (case-insensitive) or nothing is
+   *     linked — a PR from another repo pasted into the thread is not the
+   *     thread's PR. When the identity is unknown the detection is still
+   *     allowed. The identity's own spelling is stored so the value matches the
+   *     manual-link path; the URL and number come from the detected reference.
+   *
+   * Fails soft: any error is logged and the turn continues.
+   */
+  const maybeLinkThreadPullRequestFromConversation = Effect.fn(
+    "maybeLinkThreadPullRequestFromConversation",
+  )(function* (input: { readonly threadId: ThreadId }) {
+    yield* Effect.gen(function* () {
+      const thread = yield* resolveThread(input.threadId);
+      // Overwrite guard: an existing link (manual or earlier auto) always wins.
+      if (!thread || thread.linkedPullRequest != null) {
+        return;
+      }
+
+      // Scan the whole conversation in order so the LAST URL — the most recent
+      // PR the session named — is the one linked. Assistant replies carry the
+      // `gh pr create` result and any PR URL the agent wrote.
+      const conversation = thread.messages.map((entry) => entry.text).join("\n");
+      const detected = extractPullRequestReference(conversation);
+      if (detected === null) {
+        return;
+      }
+
+      const project = yield* resolveProject(thread.projectId);
+      const identity = project?.repositoryIdentity ?? null;
+      const projectRepository =
+        identity?.displayName ??
+        (identity?.owner && identity.name ? `${identity.owner}/${identity.name}` : null);
+      // Repo guard: a known project repo must match; an unknown one is allowed.
+      const repository = resolveLinkedRepository(detected.repository, projectRepository);
+      if (repository === null) {
+        return;
+      }
+
+      // Re-read now, right before writing: a link set since the scan started
+      // (manual, or a concurrent turn's detection) must not be clobbered.
+      const current = yield* resolveThread(input.threadId);
+      if (!current || current.linkedPullRequest != null) {
+        return;
+      }
+
+      yield* orchestrationEngine.dispatch({
+        type: "thread.meta.update",
+        commandId: yield* serverCommandId("thread-link-pull-request"),
+        threadId: input.threadId,
+        linkedPullRequest: {
+          projectId: current.projectId,
+          repository,
+          number: detected.number,
+          url: detected.url,
+        },
+      });
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("provider command reactor failed to link thread pull request", {
+          threadId: input.threadId,
+          cause: Cause.pretty(cause),
+        }),
+      ),
+    );
+  });
+
   const regenerateThreadTitle = Effect.fn("regenerateThreadTitle")(function* (
     event: Extract<ProviderIntentEvent, { type: "thread.meta-updated" }>,
     requestId: CommandId,
@@ -1392,6 +1475,14 @@ const make = Effect.gen(function* () {
     }
 
     yield* ensureThreadWorktree(thread);
+
+    // Independent of auto-classification: link a PR the session already
+    // surfaced (a `gh pr create` result, a URL in the agent's reply) so the
+    // PR-detail poll and review decision light up on their own. Cheap pure text
+    // scan, so it runs every turn until a link is set, then no-ops.
+    yield* maybeLinkThreadPullRequestFromConversation({
+      threadId: event.payload.threadId,
+    }).pipe(Effect.forkScoped);
 
     const isFirstUserMessageTurn =
       thread.messages.filter((entry) => entry.role === "user").length === 1;

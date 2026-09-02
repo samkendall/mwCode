@@ -1212,6 +1212,85 @@ describe("ProviderCommandReactor", () => {
     });
   });
 
+  describe("pull request auto-linking", () => {
+    const now = "2026-01-01T00:00:00.000Z";
+    let prTurnCounter = 0;
+    const startTurn = async (harness: Awaited<ReturnType<typeof createHarness>>, text: string) => {
+      prTurnCounter += 1;
+      await harness.runEffect(
+        harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.make(`cmd-turn-start-pr-${prTurnCounter}`),
+          threadId: ThreadId.make("thread-1"),
+          message: {
+            messageId: asMessageId(`user-msg-pr-${prTurnCounter}`),
+            role: "user",
+            text,
+            attachments: [],
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          createdAt: now,
+        }),
+      );
+    };
+    const linkedPr = async (harness: Awaited<ReturnType<typeof createHarness>>) => {
+      const readModel = await harness.readModel();
+      return readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"))
+        ?.linkedPullRequest;
+    };
+
+    it("links a pull request URL surfaced in the conversation", async () => {
+      const harness = await createHarness();
+
+      await startTurn(harness, "Opened it: https://github.com/owner/repo/pull/321 — take a look.");
+
+      await waitFor(async () => (await linkedPr(harness)) != null);
+      const pr = await linkedPr(harness);
+      expect(pr).toEqual({
+        projectId: asProjectId("project-1"),
+        repository: "owner/repo",
+        number: 321,
+        url: "https://github.com/owner/repo/pull/321",
+      });
+    });
+
+    it("does not overwrite an existing linked pull request", async () => {
+      const harness = await createHarness();
+      await harness.runEffect(
+        harness.engine.dispatch({
+          type: "thread.meta.update",
+          commandId: CommandId.make("cmd-preset-linked-pr"),
+          threadId: ThreadId.make("thread-1"),
+          linkedPullRequest: {
+            projectId: asProjectId("project-1"),
+            repository: "owner/repo",
+            number: 1,
+            url: "https://github.com/owner/repo/pull/1",
+          },
+        }),
+      );
+      await waitFor(async () => (await linkedPr(harness))?.number === 1);
+
+      await startTurn(harness, "Superseded by https://github.com/owner/repo/pull/999 now.");
+      await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+      await harness.drain();
+
+      // The earlier link wins; auto-detection never clobbers it.
+      expect((await linkedPr(harness))?.number).toBe(1);
+    });
+
+    it("leaves the thread unlinked when no pull request URL appears", async () => {
+      const harness = await createHarness();
+
+      await startTurn(harness, "Just a normal message with no pull request in it.");
+      await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+      await harness.drain();
+
+      expect(await linkedPr(harness)).toBeUndefined();
+    });
+  });
+
   it("regenerates a thread title from the current conversation", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";
