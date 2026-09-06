@@ -224,7 +224,7 @@ executables declared as unpacked by that archive must be present at the matching
 paths below `resources/server.asar.unpacked`. The Windows-native backend reads
 the archive in place through Electron. Packaged Windows builds also ship a
 Linux-only `resources/wsl-runtime.tar.gz` plus its SHA-256 sidecar. WSL verifies
-and extracts that archive into `~/.t3/wsl-runtime/sha256-<archive-digest>` inside
+and extracts that archive into `~/.mwcode/wsl-runtime/sha256-<archive-digest>` inside
 the selected distro, then reuses it for later launches of the same update. The
 Windows-side `wsl-server-tree/<version>` extraction remains a fallback and is
 removed after the distro-local runtime passes preflight.
@@ -329,7 +329,7 @@ Checklist:
    - `APPLE_API_KEY`: contents of the downloaded `.p8`
    - `APPLE_API_KEY_ID`: Key ID
    - `APPLE_API_ISSUER`: Issuer ID
-10. Complete the Clerk Native API and AASA setup in [T3 Connect Clerk Setup](../internals/t3-connect.md#desktop-passkeys).
+10. Complete the Clerk Native API and AASA setup in [T3 Connect setup](./connect-setup.md#desktop-passkeys).
 11. Re-run a tag release and confirm macOS artifacts are signed/notarized and contain the expected
     `com.apple.developer.associated-domains` entitlement.
 

@@ -42,7 +42,7 @@ import {
   migrationManifest,
   runMigrations,
 } from "../src/persistence/Migrations.ts";
-import * as NodeSqliteClient from "../src/persistence/NodeSqliteClient.ts";
+import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import { resolveProtectedHomes } from "./t3-sqlite-state.ts";
 
 export class MigrateDevDbNotInWorktreeError extends Schema.TaggedErrorClass<MigrateDevDbNotInWorktreeError>()(

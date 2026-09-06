@@ -14,6 +14,11 @@ export interface NormalizedGitHubPullRequestRecord {
   readonly baseRefName: string;
   readonly headRefName: string;
   readonly state: "open" | "closed" | "merged";
+  readonly isDraft?: boolean;
+  /** Only present for reads that ask `gh` for it; absent means "not requested", not "no reviews". */
+  readonly reviewDecision?: "approved" | "changes-requested" | "review-required" | null;
+  readonly closedAt?: string | null;
+  readonly mergedAt?: string | null;
   readonly updatedAt: Option.Option<DateTime.Utc>;
   readonly isCrossRepository?: boolean;
   readonly headRepositoryNameWithOwner?: string | null;
@@ -27,6 +32,9 @@ const GitHubPullRequestSchema = Schema.Struct({
   baseRefName: TrimmedNonEmptyString,
   headRefName: TrimmedNonEmptyString,
   state: Schema.optional(Schema.NullOr(Schema.String)),
+  isDraft: Schema.optional(Schema.Boolean),
+  reviewDecision: Schema.optional(Schema.NullOr(Schema.String)),
+  closedAt: Schema.optional(Schema.NullOr(Schema.String)),
   mergedAt: Schema.optional(Schema.NullOr(Schema.String)),
   updatedAt: Schema.optional(Schema.OptionFromNullOr(Schema.DateTimeUtcFromString)),
   isCrossRepository: Schema.optional(Schema.Boolean),
@@ -53,6 +61,21 @@ const GitHubPullRequestSchema = Schema.Struct({
 function trimOptionalString(value: string | null | undefined): string | null {
   const trimmed = value?.trim() ?? "";
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function normalizeGitHubReviewDecision(
+  value: string | null | undefined,
+): "approved" | "changes-requested" | "review-required" | null {
+  switch (value?.trim().toUpperCase()) {
+    case "APPROVED":
+      return "approved";
+    case "CHANGES_REQUESTED":
+      return "changes-requested";
+    case "REVIEW_REQUIRED":
+      return "review-required";
+    default:
+      return null;
+  }
 }
 
 function normalizeGitHubPullRequestState(input: {
@@ -93,6 +116,12 @@ function normalizeGitHubPullRequestRecord(
     baseRefName: raw.baseRefName,
     headRefName: raw.headRefName,
     state: normalizeGitHubPullRequestState(raw),
+    ...(raw.isDraft === true ? { isDraft: true } : {}),
+    ...(raw.reviewDecision === undefined
+      ? {}
+      : { reviewDecision: normalizeGitHubReviewDecision(raw.reviewDecision) }),
+    closedAt: raw.closedAt ?? null,
+    mergedAt: raw.mergedAt ?? null,
     updatedAt: raw.updatedAt ?? Option.none(),
     ...(typeof raw.isCrossRepository === "boolean"
       ? { isCrossRepository: raw.isCrossRepository }

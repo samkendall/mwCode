@@ -106,15 +106,6 @@ export interface ThreadClassificationResult {
   stage: string | null;
 }
 
-export interface TextGenerationService {
-  generateCommitMessage(
-    input: CommitMessageGenerationInput,
-  ): Promise<CommitMessageGenerationResult>;
-  generatePrContent(input: PrContentGenerationInput): Promise<PrContentGenerationResult>;
-  generateBranchName(input: BranchNameGenerationInput): Promise<BranchNameGenerationResult>;
-  generateThreadTitle(input: ThreadTitleGenerationInput): Promise<ThreadTitleGenerationResult>;
-  classifyThread(input: ThreadClassificationInput): Promise<ThreadClassificationResult>;
-}
 
 /**
  * TextGeneration - Service tag for commit and change request text generation.
@@ -157,9 +148,6 @@ export class TextGeneration extends Context.Service<
     ) => Effect.Effect<ThreadClassificationResult, TextGenerationError>;
   }
 >()("t3/textGeneration/TextGeneration") {}
-
-/** @deprecated Use `TextGeneration["Service"]`. */
-export type TextGenerationShape = TextGeneration["Service"];
 
 type TextGenerationOp =
   | "generateCommitMessage"
