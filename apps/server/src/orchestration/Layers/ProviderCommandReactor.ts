@@ -38,7 +38,8 @@ import {
   extractPullRequestReference,
   resolveLinkedRepository,
 } from "../../pullRequestReference.ts";
-import { repositoryIdentityOf } from "../../pullRequest/PullRequestService.ts";
+import { sourceControlRepositorySelector } from "@t3tools/shared/sourceControl";
+import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 import { increment, orchestrationEventsProcessedTotal } from "../../observability/Metrics.ts";
 import {
   ProviderAdapterRequestError,
@@ -1321,8 +1322,11 @@ const make = Effect.gen(function* () {
       const thread = yield* projectionSnapshotQuery
         .getThreadDetailById(input.threadId, { activityKinds: PULL_REQUEST_SCAN_ACTIVITY_KINDS })
         .pipe(Effect.map(Option.getOrUndefined));
-      // Overwrite guard: an existing link (manual or earlier auto) always wins.
-      if (!thread || thread.linkedPullRequest != null) {
+      // Overwrite guard: an existing link (manual, agent-registered, or an
+      // earlier detection) always wins. Read the link array rather than the
+      // derived `linkedPullRequest`, which is null for a project whose
+      // repository identity is unknown even when links exist.
+      if (!thread || visibleThreadPullRequests(thread.pullRequests).length > 0) {
         return;
       }
 
@@ -1355,7 +1359,9 @@ const make = Effect.gen(function* () {
       const project = yield* resolveProject(thread.projectId);
       // Shared with the manual-link/PR-list path (handles the azure-devops case
       // too) so the stored repository spelling can't drift between them.
-      const projectRepository = project ? repositoryIdentityOf(project) : null;
+      const projectRepository = project
+        ? sourceControlRepositorySelector(project.repositoryIdentity)
+        : null;
       // Repo guard: a known project repo must match; an unknown one is allowed.
       const repository = resolveLinkedRepository(detected.repository, projectRepository);
       if (repository === null) {
@@ -1365,20 +1371,24 @@ const make = Effect.gen(function* () {
       // Re-read now, right before writing: a link set since the scan started
       // (manual, or a concurrent turn's detection) must not be clobbered.
       const current = yield* resolveThreadShell(input.threadId);
-      if (!current || current.linkedPullRequest != null) {
+      if (!current || visibleThreadPullRequests(current.pullRequests).length > 0) {
         return;
       }
 
+      // "agent" is the link source for a PR the session itself produced, which
+      // is what this scan found. Going through the first-class link command
+      // (rather than the legacy `thread.meta.update` field) keeps the detection
+      // out of the user's own "manual" slot, so a later manual link replaces
+      // only what the user chose.
       yield* orchestrationEngine.dispatch({
-        type: "thread.meta.update",
+        type: "thread.pull-request.link",
         commandId: yield* serverCommandId("thread-link-pull-request"),
         threadId: input.threadId,
-        linkedPullRequest: {
-          projectId: current.projectId,
-          repository,
-          number: detected.number,
-          url: detected.url,
-        },
+        host: detected.host,
+        repository,
+        number: detected.number,
+        url: detected.url,
+        source: "agent",
       });
     }).pipe(
       Effect.catchCause((cause) =>
@@ -1568,12 +1578,15 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    const thread = yield* resolveThreadDetail(event.payload.threadId);
+    const thread = yield* resolveThreadShell(event.payload.threadId);
     if (!thread) {
       return;
     }
-    const message = thread.messages.find((entry) => entry.id === event.payload.messageId);
-    if (!message || message.role !== "user") {
+    const turnStart = yield* projectionSnapshotQuery.getTurnStartMessage({
+      threadId: thread.id,
+      messageId: event.payload.messageId,
+    });
+    if (Option.isNone(turnStart) || turnStart.value.message.role !== "user") {
       yield* appendProviderFailureActivity({
         threadId: event.payload.threadId,
         kind: "provider.turn.start.failed",
@@ -1585,6 +1598,7 @@ const make = Effect.gen(function* () {
       });
       return;
     }
+    const { message, hasOtherUserMessages } = turnStart.value;
     const appendTurnStartFailure = (summary: string, detail: string) =>
       appendProviderFailureActivity({
         threadId: event.payload.threadId,
@@ -1685,10 +1699,7 @@ const make = Effect.gen(function* () {
     }).pipe(Effect.forkScoped);
 
     const isCompactCommand = isCompactCommandMessage(message);
-    const nonCompactUserMessageCount = thread.messages.filter(
-      (entry) => entry.role === "user" && !isCompactCommandMessage(entry),
-    ).length;
-    if (nonCompactUserMessageCount === 1 && !isCompactCommand) {
+    if (!hasOtherUserMessages && !isCompactCommand) {
       const project = yield* resolveProject(thread.projectId);
       const generationCwd =
         resolveThreadWorkspaceCwd({
@@ -1786,7 +1797,7 @@ const make = Effect.gen(function* () {
         ),
       );
     if (isCompactCommand) {
-      if (nonCompactUserMessageCount === 0) {
+      if (!hasOtherUserMessages) {
         return yield* appendTurnStartFailure(
           "Context compaction failed",
           "Context compaction requires an existing conversation.",
@@ -2023,6 +2034,9 @@ const make = Effect.gen(function* () {
           threadId: event.payload.threadId,
           requestId: event.payload.requestId,
           answers: event.payload.answers,
+          ...(event.payload.attachmentsByQuestionId
+            ? { attachmentsByQuestionId: event.payload.attachmentsByQuestionId }
+            : {}),
         })
         .pipe(
           Effect.catchCause((cause) =>

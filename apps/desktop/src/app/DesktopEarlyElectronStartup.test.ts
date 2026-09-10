@@ -81,7 +81,9 @@ describe("DesktopEarlyElectronStartup", () => {
     });
 
     assert.deepEqual(options, {
+      isDevelopment: true,
       linuxWmClass: "mwcode-dev",
+      linuxDesktopEntryName: "net.samkendall.mwcode.Development.desktop",
       passwordStore: "gnome-libsecret",
     });
   });

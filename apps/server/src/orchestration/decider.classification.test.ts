@@ -41,6 +41,7 @@ function makeReadModel(input: {
         workType: input.workType ?? null,
         stage: input.stage ?? null,
         deletedAt: null,
+        pullRequests: [],
         messages: [],
         proposedPlans: [],
         activities: [],

@@ -915,6 +915,48 @@ describe("ProviderCommandReactor", () => {
     }),
   );
 
+  effectIt.effect("starts a turn and generates its title without loading old message bodies", () =>
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>();
+      const titleGenerated = yield* Deferred.make<void>();
+      const harness = yield* Effect.promise(() =>
+        createHarness({
+          unreadableHistory: true,
+          startSessionEffect: (session) =>
+            Deferred.succeed(started, undefined).pipe(Effect.as(session)),
+        }),
+      );
+      harness.generateThreadTitle.mockReturnValue(
+        Deferred.succeed(titleGenerated, undefined).pipe(Effect.as({ title: "Generated title" })),
+      );
+      yield* harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-with-old-history"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: MessageId.make("message-turn-start-with-old-history"),
+          role: "user",
+          text: "Use the current message",
+          attachments: [],
+        },
+        titleSeed: "Thread",
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:01.000Z",
+      });
+      yield* Deferred.await(started);
+      yield* Deferred.await(titleGenerated);
+      yield* Effect.promise(() => harness.drain());
+
+      expect(harness.sendTurn).toHaveBeenCalledWith(
+        expect.objectContaining({ input: "Use the current message" }),
+      );
+      expect(harness.generateThreadTitle).toHaveBeenCalledWith(
+        expect.objectContaining({ message: "Use the current message" }),
+      );
+    }),
+  );
+
   effectIt.effect("rejects /compact without conversation context", () =>
     Effect.gen(function* () {
       const harness = yield* Effect.promise(() => createHarness());
@@ -1896,10 +1938,14 @@ describe("ProviderCommandReactor", () => {
         }),
       );
     };
+    // The derived `linkedPullRequest` is null for a project with no repository
+    // identity, so read the link array the projector actually writes.
     const linkedPr = async (harness: Awaited<ReturnType<typeof createHarness>>) => {
       const readModel = await harness.readModel();
-      return readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"))
-        ?.linkedPullRequest;
+      const links =
+        readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"))?.pullRequests ??
+        [];
+      return links.length === 0 ? undefined : links[links.length - 1];
     };
 
     it("links a pull request URL surfaced in the conversation", async () => {
@@ -1909,11 +1955,12 @@ describe("ProviderCommandReactor", () => {
 
       await waitFor(async () => (await linkedPr(harness)) != null);
       const pr = await linkedPr(harness);
-      expect(pr).toEqual({
-        projectId: asProjectId("project-1"),
+      expect(pr).toMatchObject({
+        host: "github.com",
         repository: "owner/repo",
         number: 321,
         url: "https://github.com/owner/repo/pull/321",
+        source: "agent",
       });
     });
 
@@ -1955,11 +2002,12 @@ describe("ProviderCommandReactor", () => {
 
       await waitFor(async () => (await linkedPr(harness)) != null);
       const pr = await linkedPr(harness);
-      expect(pr).toEqual({
-        projectId: asProjectId("project-1"),
+      expect(pr).toMatchObject({
+        host: "github.com",
         repository: "owner/repo",
         number: 777,
         url: "https://github.com/owner/repo/pull/777",
+        source: "agent",
       });
     });
 

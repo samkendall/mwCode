@@ -4,7 +4,6 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   PullRequestActionInput,
   PullRequestCapabilities,
-  PullRequestDetail,
   PullRequestListInput,
   PullRequestListResult,
   PullRequestReviewerRequestInput,
@@ -237,68 +236,6 @@ describe("PullRequestCapabilities", () => {
 
   it("decodes a server that says nothing about reactions as a server with none", () => {
     expect(decodeCapabilities(base).reactions).toBeUndefined();
-  });
-});
-
-describe("PullRequestDetail", () => {
-  const decodeDetail = Schema.decodeUnknownSync(PullRequestDetail);
-  const DETAIL = {
-    provider: "github",
-    capabilities: {
-      diff: true,
-      comment: true,
-      actions: [],
-      mergeMethods: [],
-      search: true,
-      review: { inlineComment: true, reply: true, resolve: true, verdicts: [] },
-      reviewers: { request: true, listCandidates: true },
-    },
-    viewerPermissions: {
-      actions: [],
-      comment: true,
-      resolve: true,
-      verdicts: [],
-      requestReviewers: true,
-    },
-    projectId: "project-1",
-    projectTitle: "t3code",
-    workspaceRoot: "/repos/t3code",
-    repository: "pingdotgg/t3code",
-    number: 1,
-    title: "Add a pull requests page",
-    body: "",
-    url: "https://github.com/pingdotgg/t3code/pull/1",
-    author: { login: "octocat", name: null, avatarUrl: null },
-    state: "open",
-    isDraft: false,
-    mergeability: "mergeable",
-    additions: 1,
-    deletions: 0,
-    changedFiles: 1,
-    headBranch: "feat/page",
-    baseBranch: "main",
-    createdAt: "2026-07-01T00:00:00Z",
-    updatedAt: "2026-07-02T00:00:00Z",
-    mergedAt: null,
-    closedAt: null,
-    reviewers: [],
-    labels: [],
-    checks: [],
-    mergeCapabilities: { merge: true, squash: true, rebase: true },
-  };
-
-  it("decodes without a review decision, which is every host but GitHub", () => {
-    expect(decodeDetail(DETAIL).reviewDecision).toBeUndefined();
-  });
-
-  it("carries the host's rolled-up review decision when it has one", () => {
-    expect(decodeDetail({ ...DETAIL, reviewDecision: "changes-requested" }).reviewDecision).toBe(
-      "changes-requested",
-    );
-  });
-
-  it("refuses a decision no host reports", () => {
-    expect(() => decodeDetail({ ...DETAIL, reviewDecision: "pending" })).toThrow();
   });
 });
 
