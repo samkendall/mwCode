@@ -6,9 +6,9 @@ import { TextGenerationError } from "@t3tools/contracts";
 
 import * as ProviderInstanceRegistry from "../provider/Services/ProviderInstanceRegistry.ts";
 import type { ProviderInstance } from "../provider/ProviderDriver.ts";
+import * as SourceControlProviderRegistry from "../sourceControl/SourceControlProviderRegistry.ts";
+import * as ThreadTitleLinks from "./ThreadTitleLinks.ts";
 import type { TextGenerationPolicy } from "./TextGenerationPolicy.ts";
-
-export type TextGenerationProvider = "codex" | "claudeAgent" | "cursor" | "grok" | "opencode";
 
 export interface CommitMessageGenerationInput {
   cwd: string;
@@ -60,6 +60,7 @@ export interface BranchNameGenerationResult {
 }
 
 export interface ThreadTitleGenerationInput {
+  linkedContext?: string | undefined;
   cwd: string;
   message: string;
   /** Present when replacing an existing title from the current thread history. */
@@ -71,6 +72,7 @@ export interface ThreadTitleGenerationInput {
 
 export interface ThreadTitleGenerationResult {
   title: string;
+  needsRefinement?: boolean | undefined;
 }
 
 /** One allowed taxonomy option (work type or stage) passed to the classifier. */
@@ -105,7 +107,6 @@ export interface ThreadClassificationResult {
   /** A taxonomy stage id, or null when the model declined. Unvalidated. */
   stage: string | null;
 }
-
 
 /**
  * TextGeneration - Service tag for commit and change request text generation.
@@ -174,10 +175,11 @@ const resolveInstance = (
     ),
   );
 
-export const makeTextGenerationFromRegistry = (
-  registry: ProviderInstanceRegistry.ProviderInstanceRegistry["Service"],
-): TextGeneration["Service"] =>
-  TextGeneration.of({
+/** @public Service construction is part of the canonical Effect module API. */
+export const make = Effect.gen(function* () {
+  const registry = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
+  const sourceControl = yield* SourceControlProviderRegistry.SourceControlProviderRegistry;
+  return TextGeneration.of({
     generateCommitMessage: (input) =>
       resolveInstance(registry, "generateCommitMessage", input.modelSelection.instanceId).pipe(
         Effect.flatMap((textGeneration) => textGeneration.generateCommitMessage(input)),
@@ -192,18 +194,25 @@ export const makeTextGenerationFromRegistry = (
       ),
     generateThreadTitle: (input) =>
       resolveInstance(registry, "generateThreadTitle", input.modelSelection.instanceId).pipe(
-        Effect.flatMap((textGeneration) => textGeneration.generateThreadTitle(input)),
+        Effect.flatMap((textGeneration) =>
+          Effect.gen(function* () {
+            const linkedContext =
+              input.linkedContext ??
+              (yield* ThreadTitleLinks.resolveThreadTitleLinks(input).pipe(
+                Effect.provideService(
+                  SourceControlProviderRegistry.SourceControlProviderRegistry,
+                  sourceControl,
+                ),
+              ));
+            return yield* textGeneration.generateThreadTitle({ ...input, linkedContext });
+          }),
+        ),
       ),
     classifyThread: (input) =>
       resolveInstance(registry, "classifyThread", input.modelSelection.instanceId).pipe(
         Effect.flatMap((textGeneration) => textGeneration.classifyThread(input)),
       ),
   });
-
-/** @public Service construction is part of the canonical Effect module API. */
-export const make = Effect.gen(function* () {
-  const registry = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
-  return makeTextGenerationFromRegistry(registry);
 });
 
 export const layer = Layer.effect(TextGeneration, make);

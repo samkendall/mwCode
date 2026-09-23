@@ -6,7 +6,7 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { FORK_MIGRATIONS_TABLE, runMigrations } from "../../Migrations.ts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 
-const layer = it.layer(Layer.mergeAll(NodeSqliteClient.layerMemory()));
+const layer = it.layer(Layer.mergeAll(NodeSqliteClient.layer({ filename: ":memory:" })));
 
 layer("fork/002_ProjectionThreadsStageManual", (it) => {
   it.effect("adds the stage_manual column", () =>

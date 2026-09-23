@@ -518,9 +518,6 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
       assert.deepStrictEqual(Option.getOrNull(persisted)?.linkedPullRequest, linkedPullRequest);
       assert.deepStrictEqual(Option.getOrNull(persisted)?.branchPullRequest, branchPullRequest);
 
-      const listed = yield* threads.listByProjectId({ projectId: linkedPullRequest.projectId });
-      assert.deepStrictEqual(listed[0]?.branchPullRequest, branchPullRequest);
-
       const row = Option.getOrNull(persisted);
       if (row === null) return yield* Effect.die("Expected linked thread row to exist.");
       yield* threads.upsert({ ...row, linkedPullRequest: null });
@@ -696,7 +693,7 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
     }),
   );
 
-  it.effect("round-trips workType and stage through getById and listByProjectId", () =>
+  it.effect("round-trips workType and stage through getById", () =>
     Effect.gen(function* () {
       const threads = yield* ProjectionThreadRepository;
 
@@ -736,12 +733,6 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
       if (row === null) return yield* Effect.die("Expected classified thread row to exist.");
       assert.strictEqual(row.workType, "feature");
       assert.strictEqual(row.stage, "in-review");
-
-      const listed = yield* threads.listByProjectId({
-        projectId: ProjectId.make("project-classified"),
-      });
-      assert.strictEqual(listed[0]?.workType, "feature");
-      assert.strictEqual(listed[0]?.stage, "in-review");
 
       // The upsert must also carry clears back to SQL NULL.
       yield* threads.upsert({ ...row, workType: null, stage: null });

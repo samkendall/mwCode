@@ -74,63 +74,65 @@ const ClassificationChip = memo(function ClassificationChip(props: {
         ) : null}
       </PopoverTrigger>
       {open ? (
-        <PopoverPopup side="bottom" align="start" className="w-52" viewportClassName="p-1">
-          <div className="px-2 pb-1 pt-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
-            {props.dimensionLabel}
-          </div>
-          {props.entries.map((entry) => {
-            const selected = entry.id === badge.id;
-            return (
+        <PopoverPopup side="bottom" align="start" className="w-52" padding="none">
+          <div className="p-1">
+            <div className="px-2 pb-1 pt-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
+              {props.dimensionLabel}
+            </div>
+            {props.entries.map((entry) => {
+              const selected = entry.id === badge.id;
+              return (
+                <button
+                  key={entry.id}
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setOpen(false);
+                    if (!selected) props.onSelect(props.dimension, entry.id);
+                  }}
+                  className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-foreground/90 hover:bg-accent hover:text-foreground"
+                >
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "size-2 shrink-0 rounded-full",
+                      entry.color == null && "bg-muted-foreground/40",
+                    )}
+                    style={entry.color ? { backgroundColor: entry.color } : undefined}
+                  />
+                  <span className="flex-1 truncate">{entry.label}</span>
+                  {selected ? <CheckIcon aria-hidden className="size-3.5 shrink-0" /> : null}
+                </button>
+              );
+            })}
+            <div aria-hidden className="mx-1 my-1 h-px bg-border/60" />
+            {locked && props.onResumeAuto ? (
               <button
-                key={entry.id}
                 type="button"
                 onClick={(event) => {
                   event.stopPropagation();
                   setOpen(false);
-                  if (!selected) props.onSelect(props.dimension, entry.id);
+                  props.onResumeAuto?.();
                 }}
-                className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-foreground/90 hover:bg-accent hover:text-foreground"
+                className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
               >
-                <span
-                  aria-hidden
-                  className={cn(
-                    "size-2 shrink-0 rounded-full",
-                    entry.color == null && "bg-muted-foreground/40",
-                  )}
-                  style={entry.color ? { backgroundColor: entry.color } : undefined}
-                />
-                <span className="flex-1 truncate">{entry.label}</span>
-                {selected ? <CheckIcon aria-hidden className="size-3.5 shrink-0" /> : null}
+                <RotateCcwIcon aria-hidden className="size-3.5 shrink-0" />
+                <span className="flex-1">Resume auto</span>
               </button>
-            );
-          })}
-          <div aria-hidden className="mx-1 my-1 h-px bg-border/60" />
-          {locked && props.onResumeAuto ? (
+            ) : null}
             <button
               type="button"
               onClick={(event) => {
                 event.stopPropagation();
                 setOpen(false);
-                props.onResumeAuto?.();
+                props.onSelect(props.dimension, null);
               }}
               className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
             >
-              <RotateCcwIcon aria-hidden className="size-3.5 shrink-0" />
-              <span className="flex-1">Resume auto</span>
+              <XIcon aria-hidden className="size-3.5 shrink-0" />
+              <span className="flex-1">Clear</span>
             </button>
-          ) : null}
-          <button
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation();
-              setOpen(false);
-              props.onSelect(props.dimension, null);
-            }}
-            className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
-          >
-            <XIcon aria-hidden className="size-3.5 shrink-0" />
-            <span className="flex-1">Clear</span>
-          </button>
+          </div>
         </PopoverPopup>
       ) : null}
     </Popover>

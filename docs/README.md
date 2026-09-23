@@ -14,6 +14,7 @@
 - [Work type and stage options](./user/harness-taxonomy.md)
 - [SnapShots](./user/snap-shot.md)
 - [Import browser sessions](./user/browser-import.md)
+- [Devices](./user/devices.md)
 - [Usage and limits](./user/usage.md)
 - [Product usage data](./user/telemetry.md)
 - [Remote access](./user/remote-access.md)
@@ -36,6 +37,7 @@ source alone does not explain. Most code changes do not need an internal documen
 - [Glossary](./internals/glossary.md)
 - [Connection runtime](./internals/connection-runtime.md)
 - [Providers](./internals/providers.md)
+- [Pull request file revisions](./internals/pull-request-file-revisions.md)
 - [Model classification](./internals/model-manifest.md)
 - [Remote environments](./internals/remote.md)
 - [Server updates](./internals/server-updates.md)
@@ -47,6 +49,7 @@ source alone does not explain. Most code changes do not need an internal documen
 - [Mobile navigation](./internals/mobile-navigation.md)
 - [Mobile development lifecycle](./internals/mobile-development.md)
 - [Terminal runtime](./internals/terminal-runtime.md)
+- [Devices](./internals/devices.md)
 - [Voice input](./internals/voice-input.md)
 
 ### Runbooks
