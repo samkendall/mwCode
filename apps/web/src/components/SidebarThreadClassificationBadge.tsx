@@ -76,7 +76,7 @@ const ClassificationChip = memo(function ClassificationChip(props: {
       {open ? (
         <PopoverPopup side="bottom" align="start" className="w-52" padding="none">
           <div className="p-1">
-            <div className="px-2 pb-1 pt-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/70">
+            <div className="px-2 pb-1 pt-1 text-3xs font-medium uppercase tracking-wide text-muted-foreground/70">
               {props.dimensionLabel}
             </div>
             {props.entries.map((entry) => {

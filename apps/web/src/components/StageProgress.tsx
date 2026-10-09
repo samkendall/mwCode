@@ -34,7 +34,7 @@ export const StageProgress = memo(function StageProgress(props: {
     return (
       <span
         aria-hidden
-        className="shrink-0 tabular-nums text-[10px] font-medium leading-none text-muted-foreground/70"
+        className="shrink-0 tabular-nums text-3xs font-medium leading-none text-muted-foreground/70"
         style={currentColor ? { color: currentColor } : undefined}
       >
         {fillIndex >= 0 ? `${fillIndex + 1}/${count}` : `–/${count}`}
@@ -43,7 +43,7 @@ export const StageProgress = memo(function StageProgress(props: {
   }
 
   return (
-    <span aria-hidden className="inline-flex shrink-0 items-center gap-[3px]">
+    <span aria-hidden className="inline-flex shrink-0 items-center gap-0.75">
       {props.stages.map((entry, index) => {
         const isCurrent = index === fillIndex;
         const isFilled = fillIndex >= 0 && index <= fillIndex;

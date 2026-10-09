@@ -11,8 +11,8 @@ import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { Argument, Command, Flag } from "effect/unstable/cli";
+import * as SqlClient from "effect/sql/SqlClient";
+import { Argument, Command, Flag } from "effect/cli";
 
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 
@@ -208,7 +208,7 @@ export const runSqliteState = Effect.fn("runSqliteState")(function* (
   const path = yield* Path.Path;
   const baseDir = path.resolve(input.baseDir);
   const protectedHomes = resolveProtectedHomes(path, options);
-  const databasePath = path.join(baseDir, "userdata", "state.sqlite");
+  const databasePath = path.join(baseDir, "userdata", "statev2.sqlite");
   const source = yield* resolveSqlSource(input.sql, input.file);
 
   if (!(yield* fs.exists(databasePath))) {
@@ -280,7 +280,7 @@ const t3SqliteStateCommand = Command.make(
       Argument.withDescription("Run a read-only query or a backed-up fixture mutation."),
     ),
     baseDir: Flag.String("base-dir").pipe(
-      Flag.withDescription("Explicit T3 base directory containing userdata/state.sqlite."),
+      Flag.withDescription("Explicit T3 base directory containing userdata/statev2.sqlite."),
     ),
     sql: Flag.String("sql").pipe(
       Flag.optional,
