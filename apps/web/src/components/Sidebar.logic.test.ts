@@ -1191,6 +1191,23 @@ describe("sortActiveThreadsForSidebar", () => {
       "no-pr-old",
     ]);
   });
+
+  it("counts every source the row's pull request badge reads, not just the legacy link", () => {
+    const threads = [
+      { id: "none", createdAt: "2026-03-09T13:00:00.000Z" },
+      { id: "dismissed-only", createdAt: t12, pullRequests: [{ source: "stack-dismissed" }] },
+      { id: "agent-linked", createdAt: t11, pullRequests: [{ source: "agent" }] },
+      { id: "branch", createdAt: t09, branchPullRequest: { number: 3 } },
+      { id: "empty-list", createdAt: t08, pullRequests: [], branchPullRequest: null },
+    ];
+    expect(sortActiveThreadsForSidebar(threads, "pr", taxonomy).map((t) => t.id)).toEqual([
+      "agent-linked",
+      "branch",
+      "none",
+      "dismissed-only",
+      "empty-list",
+    ]);
+  });
 });
 
 describe("tierActiveThreadsForSidebar", () => {

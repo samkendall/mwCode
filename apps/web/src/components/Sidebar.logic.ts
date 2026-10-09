@@ -1083,7 +1083,22 @@ type ActiveSortInput = {
   readonly hasPendingApprovals?: boolean | undefined;
   readonly hasPendingUserInput?: boolean | undefined;
   readonly linkedPullRequest?: { readonly number: number } | null | undefined;
+  readonly pullRequests?: ReadonlyArray<{ readonly source: string }> | undefined;
+  readonly branchPullRequest?: object | null | undefined;
 };
+
+/**
+ * Whether the row would show a pull request badge. Links live in `pullRequests`
+ * (minus dismissed stack members, as in visibleThreadPullRequests), with the
+ * branch's own pull request and the legacy single link as fallbacks.
+ */
+function threadHasPullRequest(thread: ActiveSortInput): boolean {
+  return (
+    (thread.pullRequests ?? []).some((link) => link.source !== "stack-dismissed") ||
+    thread.branchPullRequest != null ||
+    thread.linkedPullRequest != null
+  );
+}
 
 /**
  * Layers an explicit sort preference over an already-ordered ACTIVE section.
@@ -1115,7 +1130,7 @@ export function tierActiveThreadsForSidebar<T extends ActiveSortInput>(
         return index === -1 ? taxonomy.length : index;
       }
       case "pr":
-        return thread.linkedPullRequest != null ? 0 : 1;
+        return threadHasPullRequest(thread) ? 0 : 1;
     }
   };
 
