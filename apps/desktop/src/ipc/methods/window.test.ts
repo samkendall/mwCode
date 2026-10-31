@@ -187,10 +187,17 @@ describe("getRelayTelemetryEnabled", () => {
           }),
         ),
       );
-      assert.isTrue(
+      assert.isFalse(
         yield* getRelayTelemetryEnabled
           .handler()
           .pipe(Effect.provideService(HostProcess.Environment, {})),
+      );
+      assert.isTrue(
+        yield* getRelayTelemetryEnabled.handler().pipe(
+          Effect.provideService(HostProcess.Environment, {
+            T3CODE_TELEMETRY_ENABLED: "true",
+          }),
+        ),
       );
     }),
   );
