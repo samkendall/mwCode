@@ -133,7 +133,7 @@ export interface RunSqliteStateOptions {
 
 /** Live app data directories that scripts must never mutate: this fork's
  * `~/.mwcode` and the upstream T3 Code install's `~/.t3`. */
-export const PROTECTED_SHARED_HOME_NAMES = [".mwcode", ".t3"] as const;
+const PROTECTED_SHARED_HOME_NAMES = [".mwcode", ".t3"] as const;
 
 /** An explicit `sharedHome` narrows the guard to that one directory; otherwise
  * every live app data directory under the home directory is protected. */
@@ -229,6 +229,8 @@ export const runSqliteState = Effect.fn("runSqliteState")(function* (
   const program = Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     yield* sql.unsafe("PRAGMA busy_timeout = 5000").unprepared;
+    // This connection can checkpoint statev2.sqlite, so it needs Sqlite.ts's F_FULLFSYNC barrier.
+    yield* sql.unsafe("PRAGMA checkpoint_fullfsync = ON").unprepared;
 
     if (input.operation === "query") {
       const rows = yield* sql.unsafe<RawSqliteRow>(source).unprepared.pipe(

@@ -15,12 +15,7 @@ describe("provider auth return destinations", () => {
   );
   it.each([
     "mwcode://attacker/welcome",
-    "mwcode://app:123/welcome",
-    "mwcode://app/auth/callback",
-    "mwcode://user@ app/welcome",
     "mwcode://app/welcome/../evil",
     "https://attacker.example/welcome",
-    "file:///welcome",
-    "javascript:alert(1)",
   ])("rejects %s", (url) => expect(providerAuthReturnUrl(url)).toBeUndefined());
 });

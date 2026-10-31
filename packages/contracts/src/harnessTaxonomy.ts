@@ -1,16 +1,6 @@
 /**
- * HarnessTaxonomy — fork-local, runtime-configurable vocabulary for the
- * thread `workType` and `stage` classification fields.
- *
- * A thread stores an opaque `workType`/`stage` id (see `OrchestrationThread`).
- * This taxonomy defines the ALLOWED ids plus their display metadata (label,
- * color) and an optional hint that doubles as an LLM classification cue. It is
- * loaded from disk at runtime so the taxonomy can differ per coding harness
- * without rebuilding — the server merges the on-disk files over
- * {@link DEFAULT_HARNESS_TAXONOMY} and ships the effective set to clients.
- *
- * This module stays pure: schema plus the seed constant only. All file IO and
- * merge logic lives server-side.
+ * Fork-local vocabulary for thread `workType`/`stage`: allowed ids, display metadata and LLM
+ * hints. Pure schema and seed; the server loads and merges the on-disk files.
  *
  * @module HarnessTaxonomy
  */

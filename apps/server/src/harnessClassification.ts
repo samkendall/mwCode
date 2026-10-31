@@ -1,16 +1,6 @@
 /**
- * Pure helpers for first-turn thread classification.
- *
- * Two concerns live here, both free of IO so they are trivially testable:
- *   1. {@link parseExplicitWorkType} — a conservative cheap parse of the first
- *      user message that resolves a work type WITHOUT an LLM when the user
- *      spelled one out (a leading slash tier like `/momo feature ...`, or a
- *      `type:`/`tier:` prefix). It overrides the model, so it only ever
- *      returns a confident, exact taxonomy match.
- *   2. {@link resolveTaxonomyId} — validates a candidate id (from the parser or
- *      the model) against a taxonomy dimension, returning the canonical id or
- *      null. This is the single gate that stops a hallucinated or stale id from
- *      being persisted.
+ * Pure helpers for thread classification: a conservative parse of an explicit work type from
+ * the first message, and the single gate that stops a hallucinated or stale id being persisted.
  *
  * @module HarnessClassification
  */
@@ -54,16 +44,9 @@ export function resolveTaxonomyId(
 const EXPLICIT_TYPE_PREFIX = /^\s*(?:work\s*type|type|tier)\s*[:=]\s*([A-Za-z0-9_-]+)/i;
 
 /**
- * Resolve a work type from an explicit signal in the first user message, or
- * null when there is none. Deliberately conservative — only exact taxonomy
- * matches count, because this result overrides the model.
- *
- * Recognised, in order:
- *   1. A leading slash command whose command word is itself a work type
- *      (`/feature ...`).
- *   2. A leading slash wrapper followed by a tier word (`/momo feature ...`),
- *      where the wrapper is not a work type but the next word is.
- *   3. A `type:` / `workType:` / `tier:` prefix (`type: bug`).
+ * A work type from the first message, or null. Only exact taxonomy matches count because this
+ * overrides the model. Recognises `/feature ...`, `/momo feature ...`, and `type: bug`
+ * (also `workType:`, `tier:`), in that order.
  */
 export function parseExplicitWorkType(message: string, taxonomy: HarnessTaxonomy): string | null {
   const firstLine = message.split(/\r?\n/, 1)[0]?.trim() ?? "";

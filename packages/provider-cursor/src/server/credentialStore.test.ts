@@ -1,25 +1,17 @@
+import type { StoredSdkCredentials } from "@cursor/sdk";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import { ProviderInstanceId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
-import * as Option from "effect/Option";
 
 import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
-import { layerTestProviderHost } from "@t3tools/provider-testing/host";
+import * as TestProviderHost from "@t3tools/provider-testing/TestProviderHost";
 import * as Layer from "effect/Layer";
 import { makeCursorCredentialStore } from "./credentialStore.ts";
 
-const layerHost = Layer.provideMerge(layerTestProviderHost(), NodeServices.layer);
-
-const legacyCredentials = {
-  version: 1 as const,
-  backendUrl: "https://api.cursor.com",
-  apiKey: "test-only-legacy-key",
-  createdAtMs: 100,
-};
-// The SDK's FileCredentialStore writes pretty-printed JSON.
+const layerHost = Layer.provideMerge(TestProviderHost.layer(), NodeServices.layer);
 const legacyFileText = `{
   "version": 1,
   "backendUrl": "https://api.cursor.com",
@@ -103,4 +95,48 @@ it.effect(
         "test-only-work-key",
       );
     }).pipe(Effect.provide(layerHost)),
+);
+
+it.effect.each([
+  {
+    name: "an undefined email",
+    optionalFields: { email: undefined, apiKeyExpiresAtMs: 1000 },
+    expectedFields: { apiKeyExpiresAtMs: 1000 },
+  },
+  {
+    name: "an undefined expiry",
+    optionalFields: { email: "test@example.com", apiKeyExpiresAtMs: undefined },
+    expectedFields: { email: "test@example.com" },
+  },
+  {
+    name: "both optional fields undefined",
+    optionalFields: { email: undefined, apiKeyExpiresAtMs: undefined },
+    expectedFields: {},
+  },
+  {
+    name: "both optional fields omitted",
+    optionalFields: {},
+    expectedFields: {},
+  },
+])("restores SDK credentials with $name in a new store", ({ optionalFields, expectedFields }) =>
+  Effect.gen(function* () {
+    const instanceId = ProviderInstanceId.make("personal");
+    const { store } = yield* makeCursorCredentialStore(instanceId);
+    const requiredFields: StoredSdkCredentials = {
+      version: 1,
+      backendUrl: "https://api.cursor.com",
+      apiKey: "test-only-key",
+      createdAtMs: 100,
+    };
+    const credentials = { ...requiredFields };
+    // Match the SDK's runtime values without relying on its stricter declarations.
+    Object.assign(credentials, optionalFields);
+    yield* Effect.tryPromise(() => store.save(credentials));
+
+    const restored = yield* makeCursorCredentialStore(instanceId);
+    assert.deepEqual(yield* Effect.tryPromise(() => restored.store.load()), {
+      ...requiredFields,
+      ...expectedFields,
+    });
+  }).pipe(Effect.provide(layerHost)),
 );

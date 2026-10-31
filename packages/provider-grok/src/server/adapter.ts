@@ -4,7 +4,8 @@ import {
   isXAiTaskCompletedWakeNotification,
   xAiRateLimitedErrorCode,
 } from "./xaiAcpExtension.ts";
-import { HostProcessEnvironment, HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { discoverGrokSkills, leadingGrokSkillMention } from "./skills.ts";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { resolveSelfInvocation, type SelfInvocation } from "@t3tools/shared/nodeRuntime";
 import {
   defaultInstanceIdForDriver,
@@ -17,12 +18,12 @@ import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
-import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
-import { ChildProcessSpawner } from "effect/process";
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 import * as EffectAcpErrors from "effect-acp/errors";
 
+import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import * as ProviderHost from "@t3tools/provider-core/server/ProviderHost";
 import { makeAcpNativeLoggerFactory } from "@t3tools/provider-acp/server/nativeLogging";
 import {
@@ -42,6 +43,7 @@ import {
   extractXAiBackgroundTaskCompletion,
   extractXAiKilledBackgroundTasks,
   extractXAiMonitorTaskId,
+  xAiBackgroundShellTaskId,
   isXAiPersistentMonitor,
   extractXAiExitPlanMarkdown,
   registerXAiSubagentFinished,
@@ -55,10 +57,14 @@ import {
 } from "./xaiAcpExtension.ts";
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
 import { acpPermissionDisposition } from "@t3tools/provider-acp/server/clientPolicy";
+import {
+  findModelConfigOption,
+  sessionModelStateFromInitialize,
+} from "@t3tools/provider-acp/server/runtimeModel";
 import * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
-import * as ProviderContinuationRequests from "@t3tools/provider-core/server/continuationRequests";
+import * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import {
   ProviderAdapterDriverCreateError,
@@ -77,8 +83,9 @@ export const GROK_PROVIDER = ProviderDriverKind.make("grok");
 const GROK_DRIVER_KIND = GROK_PROVIDER;
 export const GROK_DEFAULT_INSTANCE_ID = defaultInstanceIdForDriver(GROK_DRIVER_KIND);
 const DEFAULT_GROK_SETTINGS = Schema.decodeSync(GrokSettings)({});
+const isAcpRequestError = Schema.is(EffectAcpErrors.AcpRequestError);
 
-export const GrokProviderCapabilitiesV2 = {
+const GrokProviderCapabilitiesV2 = {
   ...AcpProviderCapabilitiesV2,
   sessions: {
     ...AcpProviderCapabilitiesV2.sessions,
@@ -112,12 +119,7 @@ export interface GrokAdapterV2Options {
   readonly settings: GrokSettings;
   readonly environment: NodeJS.ProcessEnv;
   readonly hostPlatform: NodeJS.Platform;
-  readonly childProcessSpawner: ChildProcessSpawner.ChildProcessSpawner["Service"];
-  readonly crypto: Crypto.Crypto;
   readonly selfInvocation: SelfInvocation;
-  readonly fileSystem: FileSystem.FileSystem;
-  readonly idAllocator: IdAllocator.IdAllocatorV2["Service"];
-  readonly host: ProviderHost.ProviderHostShape;
   readonly nativeLogging?: Parameters<typeof makeAcpAdapterV2>[0]["nativeLogging"];
   readonly continuationRequests?: Parameters<typeof makeAcpAdapterV2>[0]["continuationRequests"];
   readonly testHooks?: Parameters<typeof makeAcpAdapterV2>[0]["testHooks"];
@@ -126,7 +128,7 @@ export interface GrokAdapterV2Options {
   ) => Effect.Effect<
     AcpSessionRuntime.AcpSessionRuntime["Service"],
     EffectAcpErrors.AcpError,
-    Crypto.Crypto | Scope.Scope
+    ChildProcessSpawner.ChildProcessSpawner | Crypto.Crypto | Scope.Scope
   >;
   readonly assertComplete?: Effect.Effect<void, EffectAcpErrors.AcpError>;
 }
@@ -151,13 +153,7 @@ const registerGrokAcpExtensions: NonNullable<AcpAdapterV2Flavor["registerExtensi
     ),
   );
 
-/**
- * Grok intercepts exit_plan_mode and reverse-requests client approval. Capture
- * the plan into T3's proposed-plan card and abandon the native gate so the
- * turn does not hang (#8358; mirrors the Claude ExitPlanMode pattern). Plan
- * content preference: the request payload, then the plan.md contents sniffed
- * from tool calls this turn, then the empty-state placeholder.
- */
+// Capture the reverse-requested plan, then abandon the native gate to finish the turn.
 const registerGrokExitPlanModeExtensions = ({
   runtime,
   captureProposedPlan,
@@ -191,9 +187,7 @@ const registerGrokAskUserQuestionExtensions = ({
       runtime.handleExtRequest(method, XAiAskUserQuestionRequest, (params, requestContext) => {
         const identity = extractXAiAskUserQuestionIdentity(params);
         const questions = extractXAiAskUserQuestions(params).map((question) => ({
-          id: question.id,
-          header: question.header,
-          question: question.question,
+          ...question,
           options: [...question.options],
         }));
         return requestUserInput(
@@ -216,11 +210,7 @@ const registerGrokAskUserQuestionExtensions = ({
     { discard: true },
   );
 
-/**
- * Grok's permission mode is fixed at launch. Explicit approval or sandbox
- * overrides launch it asking, so every mutating prompt reaches T3's policy
- * check instead of being bypassed by always-approve or Grok's auto classifier.
- */
+/** Explicit policy overrides launch in ask mode so Grok cannot bypass T3 approval checks. */
 export function grokLaunchRuntimeMode(
   runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy,
 ): RuntimeMode {
@@ -229,49 +219,74 @@ export function grokLaunchRuntimeMode(
     : "approval-required";
 }
 
-export function makeGrokAcpAdapterFlavor(options: GrokAdapterV2Options): AcpAdapterV2Flavor {
+export function makeGrokAcpAdapterFlavor(
+  options: GrokAdapterV2Options,
+  homeDirectory: string,
+): AcpAdapterV2Flavor {
   return {
     driver: GROK_PROVIDER,
     runtimeHarness: "Grok",
     capabilities: GrokProviderCapabilitiesV2,
     interruptPromptOnCancel: false,
-    // User Stop (requestRuntimeRestart) still hard-kills the process group and
-    // respawns so existing background tasks stop too. Older 0.2.x builds could
-    // detach a cancelled foreground command (E3 harness 2026-07-18); current
-    // source kills foreground work but intentionally preserves already-
-    // backgrounded tasks. Non-Stop interrupts (mid-prompt steering,
-    // restart_active) omit requestRuntimeRestart and stay soft: session/cancel
-    // carries cancelTrigger=ctrl_c, the session survives, and background work
-    // remains available to the replacement turn.
+    // User Stop restarts the process group; steering cancels softly to preserve background work.
     restartRuntimeAfterInterrupt: true,
     terminateRuntimeProcessGroupOnInterrupt: true,
-    // Steering restarts on a settled turn additionally skip session/cancel so
-    // fire-and-forget subagents survive the steer (E1 harness confirmed the
-    // Grok CLI accepts a concurrent session/prompt in that state).
+    // Settled Grok sessions accept concurrent prompts; skip cancel to preserve background subagents.
     preserveRuntimeOnSettledInterrupt: true,
-    // Grok ACP initialize reports promptCapabilities.image:false but the agent
-    // still accepts image content blocks (verified with real screenshots).
+    // Grok accepts image blocks despite advertising promptCapabilities.image:false.
     supportsImagePrompts: true,
     supportsCompaction: true,
+    // Grok expands only a leading `/name`, while the `$` picker inserts `$name` from the
+    // `grok inspect` catalog. Ask that catalog again so other `$` text is left alone.
+    rewriteUserText: (text, turnInput) => {
+      const mention = leadingGrokSkillMention(text);
+      if (mention === undefined) return Effect.succeed(text);
+      return discoverGrokSkills(
+        options.settings,
+        options.environment,
+        turnInput.runtimePolicy.cwd ?? undefined,
+      ).pipe(
+        Effect.map((skills) =>
+          skills.some((skill) => skill.enabled && skill.name === mention.name)
+            ? `/${mention.name}${mention.rest}`
+            : text,
+        ),
+        Effect.orElseSucceed(() => text),
+      );
+    },
     resolveModelId: (selection) => resolveGrokAcpBaseModelId(selection.model),
-    applyModelSelection: ({ runtime, startResult, modelSelection }) =>
-      Effect.gen(function* () {
-        const legacy = startResult.initializeResult.protocolVersion === 1;
-        const options = legacy ? [] : yield* runtime.getConfigOptions;
-        const configuredModel = options.find((option) => option.category === "model")?.currentValue;
-        return yield* applyGrokAcpModelSelection({
-          runtime: legacy
-            ? runtime
-            : { setSessionModel: (model) => runtime.setModel(model).pipe(Effect.as({})) },
-          currentModelId: legacy
-            ? currentGrokModelIdFromSessionSetup(startResult.sessionSetupResult)
-            : typeof configuredModel === "string"
-              ? configuredModel
-              : undefined,
-          requestedModelId: resolveGrokAcpBaseModelId(modelSelection.model),
-          mapError: (cause) => cause,
-        });
-      }),
+    getModelContextWindow: (selection, session) => {
+      if (selection.instanceId !== options.instanceId) return undefined;
+      const modelId = resolveGrokAcpBaseModelId(selection.model);
+      const models =
+        session.sessionSetupResult.models ??
+        sessionModelStateFromInitialize(session.initializeResult);
+      const window = models?.availableModels.find((model) => model.modelId === modelId)?._meta
+        ?.totalContextTokens;
+      // contextWindows includes selectable larger windows; totalContextTokens is the default.
+      return typeof window === "number" && Number.isSafeInteger(window) && window > 0
+        ? window
+        : undefined;
+    },
+    applyModelSelection: Effect.fn("GrokAdapter.applyModelSelection")(function* ({
+      runtime,
+      startResult,
+      modelSelection,
+    }) {
+      const legacy = startResult.initializeResult.protocolVersion === 1;
+      const options = legacy ? [] : yield* runtime.getConfigOptions;
+      const configuredModel = findModelConfigOption(options)?.currentValue;
+      return yield* applyGrokAcpModelSelection({
+        runtime: legacy
+          ? runtime
+          : { setSessionModel: (model) => runtime.setModel(model).pipe(Effect.as({})) },
+        currentModelId: legacy
+          ? currentGrokModelIdFromSessionSetup(startResult.sessionSetupResult)
+          : configuredModel,
+        requestedModelId: resolveGrokAcpBaseModelId(modelSelection.model),
+        mapError: (cause) => cause,
+      });
+    }),
     makeRuntime:
       options.makeRuntime ??
       (({ runtimePolicy, ...input }) =>
@@ -280,21 +295,17 @@ export function makeGrokAcpAdapterFlavor(options: GrokAdapterV2Options): AcpAdap
           interruptPromptOnCancel: input.interruptPromptOnCancel ?? false,
           grokSettings: options.settings,
           environment: options.environment,
-          childProcessSpawner: options.childProcessSpawner,
           runtimeMode: grokLaunchRuntimeMode(runtimePolicy),
         })),
-    // In its Auto mode Grok decides routine actions itself and only asks about
-    // what its classifier blocked, so every prompt it sends goes to the user.
+    // Auto prompts represent classifier refusals and must reach the user.
     permissionDisposition: (policy, request) =>
       grokLaunchRuntimeMode(policy) === "auto" ? "ask" : acpPermissionDisposition(policy, request),
     approvalOptions: grokApprovalOptions,
     promptFailure: (cause) =>
       makeProviderFailure({
         cause,
-        ...(Schema.is(EffectAcpErrors.AcpRequestError)(cause)
+        ...(isAcpRequestError(cause)
           ? {
-              // Grok's own failure text rides on the cause; makeProviderFailure
-              // redacts and bounds it before it reaches the user.
               message:
                 cause.cause instanceof XAiPromptFailureText
                   ? cause.cause.message
@@ -308,14 +319,14 @@ export function makeGrokAcpAdapterFlavor(options: GrokAdapterV2Options): AcpAdap
     extractSubagentUpdate: extractXAiAcpSubagentUpdate,
     extractSubagentEndNotice: extractXAiAcpSubagentEndNotice,
     normalizeToolCall: normalizeXAiAcpToolCallState,
-    // Show the plan while Grok is still writing it: plan.md writes under the
-    // Grok session dir surface as the proposed-plan card before exit (#8358).
     extractProposedPlanMarkdown: (toolCall) =>
       extractGrokPlanMarkdownFromToolCallData(toolCall.data, {
         platform: options.hostPlatform,
         environment: options.environment,
+        homeDirectory,
       }),
     extractBackgroundTaskId: extractXAiMonitorTaskId,
+    isBackgroundCommandTool: (toolCall) => xAiBackgroundShellTaskId(toolCall) !== undefined,
     extractBackgroundToolMutation: extractXAiAcpBackgroundToolMutation,
     extractBackgroundTaskCompletion: (toolCall) => [
       ...extractXAiBackgroundTaskCompletion(toolCall),
@@ -329,15 +340,12 @@ export function makeGrokAcpAdapterFlavor(options: GrokAdapterV2Options): AcpAdap
   };
 }
 
-export function makeGrokAdapterV2(options: GrokAdapterV2Options) {
-  const flavor = makeGrokAcpAdapterFlavor(options);
-  return makeAcpAdapterV2({
+export const makeGrokAdapterV2 = Effect.fn("makeGrokAdapterV2")(function* (
+  options: GrokAdapterV2Options,
+) {
+  return yield* makeAcpAdapterV2({
     instanceId: options.instanceId,
-    flavor,
-    crypto: options.crypto,
-    fileSystem: options.fileSystem,
-    idAllocator: options.idAllocator,
-    host: options.host,
+    flavor: makeGrokAcpAdapterFlavor(options, yield* HostProcess.HomeDirectory),
     selfInvocation: options.selfInvocation,
     ...(options.nativeLogging === undefined ? {} : { nativeLogging: options.nativeLogging }),
     ...(options.continuationRequests === undefined
@@ -345,7 +353,7 @@ export function makeGrokAdapterV2(options: GrokAdapterV2Options) {
       : { continuationRequests: options.continuationRequests }),
     ...(options.testHooks === undefined ? {} : { testHooks: options.testHooks }),
   });
-}
+});
 
 export type GrokAdapterV2DriverEnv =
   | ChildProcessSpawner.ChildProcessSpawner
@@ -353,6 +361,7 @@ export type GrokAdapterV2DriverEnv =
   | FileSystem.FileSystem
   | IdAllocator.IdAllocatorV2
   | Path.Path
+  | McpProviderSessions.McpProviderSessions
   | ProviderEventLoggers.ProviderEventLoggers
   | ProviderHost.ProviderHost;
 
@@ -362,27 +371,17 @@ export const GrokAdapterV2Driver: ProviderAdapterDriver<GrokSettings, GrokAdapte
   defaultConfig: (): GrokSettings => DEFAULT_GROK_SETTINGS,
   create: Effect.fn("GrokAdapterV2Driver.create")(
     function* (input: ProviderAdapterDriverCreateInput<GrokSettings>) {
-      const hostEnvironment = yield* HostProcessEnvironment;
-      const hostPlatform = yield* HostProcessPlatform;
+      const hostEnvironment = yield* HostProcess.Environment;
+      const hostPlatform = yield* HostProcess.Platform;
       const selfInvocation = yield* resolveSelfInvocation();
-      const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-      const crypto = yield* Crypto.Crypto;
-      const fileSystem = yield* FileSystem.FileSystem;
-      const idAllocator = yield* IdAllocator.IdAllocatorV2;
       const providerEventLoggers = yield* ProviderEventLoggers.ProviderEventLoggers;
-      const host = yield* ProviderHost.ProviderHost;
       const continuationRequests = yield* ProviderContinuationRequests.ProviderContinuationRequests;
       const makeNativeLogger = yield* makeAcpNativeLoggerFactory();
-      return makeGrokAdapterV2({
+      return yield* makeGrokAdapterV2({
         instanceId: input.instanceId,
         settings: { ...input.config, enabled: input.enabled },
-        environment: mergeProviderInstanceEnvironment(input.environment, hostEnvironment),
+        environment: yield* mergeProviderInstanceEnvironment(input.environment, hostEnvironment),
         hostPlatform,
-        childProcessSpawner,
-        crypto,
-        fileSystem,
-        idAllocator,
-        host,
         selfInvocation,
         continuationRequests,
         nativeLogging: (threadId) =>
@@ -407,49 +406,3 @@ export const GrokAdapterV2Driver: ProviderAdapterDriver<GrokSettings, GrokAdapte
       ),
   ),
 };
-
-const layer: Layer.Layer<
-  ProviderAdapter.ProviderAdapterV2,
-  never,
-  | Path.Path
-  | ChildProcessSpawner.ChildProcessSpawner
-  | Crypto.Crypto
-  | FileSystem.FileSystem
-  | IdAllocator.IdAllocatorV2
-  | ProviderEventLoggers.ProviderEventLoggers
-  | ProviderHost.ProviderHost
-> = Layer.effect(
-  ProviderAdapter.ProviderAdapterV2,
-  Effect.gen(function* () {
-    const hostEnvironment = yield* HostProcessEnvironment;
-    const hostPlatform = yield* HostProcessPlatform;
-    const selfInvocation = yield* resolveSelfInvocation();
-    const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-    const crypto = yield* Crypto.Crypto;
-    const fileSystem = yield* FileSystem.FileSystem;
-    const idAllocator = yield* IdAllocator.IdAllocatorV2;
-    const providerEventLoggers = yield* ProviderEventLoggers.ProviderEventLoggers;
-    const host = yield* ProviderHost.ProviderHost;
-    const continuationRequests = yield* ProviderContinuationRequests.ProviderContinuationRequests;
-    const makeNativeLogger = yield* makeAcpNativeLoggerFactory();
-    return makeGrokAdapterV2({
-      instanceId: GROK_DEFAULT_INSTANCE_ID,
-      settings: DEFAULT_GROK_SETTINGS,
-      environment: hostEnvironment,
-      hostPlatform,
-      childProcessSpawner,
-      crypto,
-      fileSystem,
-      idAllocator,
-      host,
-      selfInvocation,
-      continuationRequests,
-      nativeLogging: (threadId) =>
-        makeNativeLogger({
-          nativeEventLogger: providerEventLoggers.native,
-          provider: GROK_PROVIDER,
-          threadId,
-        }),
-    });
-  }),
-);

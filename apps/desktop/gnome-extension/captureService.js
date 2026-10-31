@@ -1,7 +1,6 @@
-// This policy is independent of Shell so lifecycle and authorization can be tested without a desktop.
 export const CLIENT_NAMES = [
-  "com.t3tools.T3Code.SnapShot",
-  "com.t3tools.T3Code.Development.SnapShot",
+  "net.samkendall.mwcode.SnapShot",
+  "net.samkendall.mwcode.Development.SnapShot",
 ];
 
 export function isWaylandSession(meta) {

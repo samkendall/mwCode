@@ -6,22 +6,20 @@ import {
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
-  type RepositoryIdentity,
   TextGenerationError,
   ThreadId,
-  type OrchestrationV2TurnItem,
 } from "@t3tools/contracts";
-import type { ProviderAdapterV2Shape } from "@t3tools/provider-core/server/ProviderAdapter";
+import type { ProviderAdapterV2 } from "@t3tools/provider-core/server/ProviderAdapter";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
 import * as ServerConfig from "../config.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
-import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
+import * as CommandReceiptStore from "./CommandReceiptStore.ts";
 import * as ProjectStore from "./ProjectStore.ts";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
 import * as ThreadHarnessReactor from "./ThreadHarnessReactor.ts";
@@ -40,23 +38,22 @@ const adapter = {
   getCapabilities: () => Effect.succeed(CodexProviderCapabilitiesV2),
   planSelectionTransition: () => Effect.succeed({ type: "apply_on_next_turn" as const }),
   openSession: () => Effect.die("provider execution is disabled in thread harness tests"),
-} as ProviderAdapterV2Shape;
+} as ProviderAdapterV2["Service"];
 
 type ClassifyThread = TextGeneration.TextGeneration["Service"]["classifyThread"];
 
-function makeHarness(
-  options: {
-    readonly classify?: ClassifyThread;
-    readonly repositoryIdentity?: RepositoryIdentity | null;
-  } = {},
-) {
+function makeHarness(options: { readonly classify?: ClassifyThread } = {}) {
   const layerDatabase = SqlitePersistence.layerMemory;
   const layerOrchestrator = ProviderReplayHarness.layerWithRegistry(
     { name: "thread-harness" },
     ProviderAdapterRegistry.layerFromAdapters([adapter]),
     { databaseLayer: layerDatabase, runEffectWorker: false },
   );
-  const layerThreadManagement = ThreadManagement.layer.pipe(Layer.provide(layerOrchestrator));
+  const layerThreadManagement = ThreadManagement.layer.pipe(
+    Layer.provide(layerOrchestrator),
+    Layer.provide(CommandReceiptStore.layer.pipe(Layer.provide(layerDatabase))),
+    Layer.provide(ServerSettings.layerTest({})),
+  );
   const classifyThread = vi.fn<ClassifyThread>(
     options.classify ?? (() => Effect.succeed({ workType: "bug", stage: "research" })),
   );
@@ -88,9 +85,6 @@ function makeHarness(
         layerThreadManagement,
         layerProjects,
         Layer.mock(TextGeneration.TextGeneration)({ classifyThread }),
-        Layer.mock(RepositoryIdentityResolver.RepositoryIdentityResolver)({
-          resolve: () => Effect.succeed(options.repositoryIdentity ?? null),
-        }),
         ServerSettings.layerTest({}),
         ServerConfig.layerTest(process.cwd(), { prefix: "t3-thread-harness-" }),
       ),
@@ -323,121 +317,5 @@ describe("ThreadHarnessReactor.classify", () => {
       assert.isTrue(thread.workType == null);
       assert.isTrue(thread.stage == null);
     }).pipe(Effect.provide(harness.layer));
-  });
-});
-
-describe("ThreadHarnessReactor.linkPullRequestFromRun", () => {
-  const prUrl = "https://github.com/samkendall/mwCode/pull/42";
-  const latestRunId = (threadId: ThreadId) =>
-    Effect.gen(function* () {
-      const threads = yield* ThreadManagement.ThreadManagementService;
-      const run = (yield* threads.getThreadRecords(threadId, ["runs"])).runs.at(-1);
-      assert.isDefined(run);
-      return run!.id;
-    });
-  const identity = (owner: string, name: string): RepositoryIdentity => ({
-    canonicalKey: `github.com/${owner}/${name}`,
-    locator: {
-      source: "git-remote",
-      remoteName: "origin",
-      remoteUrl: `git@github.com:${owner}/${name}.git`,
-    },
-    provider: "github",
-    owner,
-    name,
-  });
-
-  it.effect("links the pull request a run named, as the agent's", () => {
-    const harness = makeHarness({ repositoryIdentity: identity("SamKendall", "mwCode") });
-    return Effect.gen(function* () {
-      const reactor = yield* ThreadHarnessReactor.ThreadHarnessReactor;
-      const threadId = yield* createThread("link");
-      yield* sendMessage(threadId, "one", `Please review ${prUrl} when you can`);
-      yield* reactor.linkPullRequestFromRun(threadId, yield* latestRunId(threadId));
-
-      const links = (yield* readThread(threadId)).pullRequests ?? [];
-      assert.equal(links.length, 1);
-      assert.equal(links[0]?.number, 42);
-      assert.equal(links[0]?.source, "agent");
-      assert.equal(links[0]?.repository.toLowerCase(), "samkendall/mwcode");
-    }).pipe(Effect.provide(harness.layer));
-  });
-
-  it.effect("ignores a pull request from another repository", () => {
-    const harness = makeHarness({ repositoryIdentity: identity("pingdotgg", "t3code") });
-    return Effect.gen(function* () {
-      const reactor = yield* ThreadHarnessReactor.ThreadHarnessReactor;
-      const threadId = yield* createThread("other-repo");
-      yield* sendMessage(threadId, "one", `Compare with ${prUrl}`);
-      yield* reactor.linkPullRequestFromRun(threadId, yield* latestRunId(threadId));
-
-      assert.deepEqual((yield* readThread(threadId)).pullRequests ?? [], []);
-    }).pipe(Effect.provide(harness.layer));
-  });
-
-  it.effect("leaves a thread that already has a link", () => {
-    const harness = makeHarness();
-    return Effect.gen(function* () {
-      const reactor = yield* ThreadHarnessReactor.ThreadHarnessReactor;
-      const threads = yield* ThreadManagement.ThreadManagementService;
-      const threadId = yield* createThread("already-linked");
-      yield* threads.dispatch({
-        type: "thread.pull-request.link",
-        commandId: CommandId.make("command:already-linked:manual"),
-        threadId,
-        host: "github.com",
-        repository: "samkendall/mwCode",
-        number: 7,
-        url: "https://github.com/samkendall/mwCode/pull/7",
-        source: "manual",
-      });
-      yield* sendMessage(threadId, "one", `Also see ${prUrl}`);
-      yield* reactor.linkPullRequestFromRun(threadId, yield* latestRunId(threadId));
-
-      const links = (yield* readThread(threadId)).pullRequests ?? [];
-      assert.deepEqual(
-        links.map((link) => link.number),
-        [7],
-      );
-    }).pipe(Effect.provide(harness.layer));
-  });
-});
-
-describe("pullRequestScanText", () => {
-  const base = {
-    threadId: ThreadId.make("thread:scan"),
-    runId: null,
-    nodeId: null,
-    providerThreadId: null,
-    providerTurnId: null,
-    nativeItemRef: null,
-    parentItemId: null,
-    status: "completed",
-    title: null,
-    startedAt: null,
-    completedAt: null,
-  } as const;
-  const item = (fields: Record<string, unknown>) =>
-    ({ ...base, ...fields }) as unknown as OrchestrationV2TurnItem;
-
-  it("reads command and tool output in timeline order", () => {
-    const text = ThreadHarnessReactor.pullRequestScanText([
-      item({ type: "assistant_message", ordinal: 3, text: "Opened it." }),
-      item({
-        type: "command_execution",
-        ordinal: 2,
-        input: "gh pr create --fill",
-        output: "https://github.com/acme/app/pull/9\n",
-      }),
-      item({
-        type: "dynamic_tool",
-        ordinal: 1,
-        output: { url: "https://github.com/acme/app/pull/3" },
-      }),
-      item({ type: "reasoning", ordinal: 0, text: "https://github.com/acme/app/pull/1" }),
-    ]);
-    assert.isFalse(text.includes("/pull/1"));
-    assert.isTrue(text.indexOf("/pull/3") < text.indexOf("/pull/9"));
-    assert.isTrue(text.indexOf("/pull/9") < text.indexOf("Opened it."));
   });
 });

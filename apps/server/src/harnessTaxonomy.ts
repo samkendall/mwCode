@@ -1,25 +1,7 @@
 /**
- * HarnessTaxonomy loader — resolves the effective thread-classification
- * vocabulary from disk.
- *
- * Layers, innermost last:
- *   1. {@link DEFAULT_HARNESS_TAXONOMY} — the built-in seed.
- *   2. Global file at `<baseDir>/harness.json` (e.g. `~/.mwcode/harness.json`).
- *   3. Per-project file at `<workspaceRoot>/.mwcode/harness.json`.
- *
- * Merge rule (documented once here): entries merge BY ID, not by whole-array
- * replacement. For each dimension (`workTypes`, `stages`), an override entry
- * whose id matches a base entry replaces it in place; an override entry with a
- * new id is appended; a base entry the override never mentions is kept. This
- * makes the common case — "add one work type" or "recolor one stage" — a
- * one-line file instead of forcing the author to restate every default. The
- * cost is that a default cannot be *removed* from a file, only shadowed; that
- * is an acceptable v1 tradeoff.
- *
- * A missing file is silently the identity merge. A malformed or
- * schema-invalid file is logged as a warning and skipped — it never throws and
- * never partially applies — so a bad config degrades to the layer below it
- * rather than taking down config load.
+ * Layers the classification vocabulary: seed, `<baseDir>/harness.json`, then per-project
+ * `.mwcode/harness.json`. Entries merge by id, so a default can be shadowed but not removed.
+ * A bad file logs a warning and is skipped, degrading to the layer below.
  *
  * @module HarnessTaxonomy
  */
@@ -77,7 +59,7 @@ function mergeEntries(
 }
 
 /** Apply a decoded file's dimensions over a base taxonomy. */
-export function mergeHarnessTaxonomy(
+function mergeHarnessTaxonomy(
   base: HarnessTaxonomy,
   override: HarnessTaxonomyFile,
 ): HarnessTaxonomy {
@@ -92,9 +74,7 @@ export function mergeHarnessTaxonomy(
  * the file is missing, unreadable, or invalid — the caller then keeps the base
  * layer unchanged.
  */
-export const loadHarnessTaxonomyFile = Effect.fn("harnessTaxonomy.loadFile")(function* (
-  filePath: string,
-) {
+const loadHarnessTaxonomyFile = Effect.fn("harnessTaxonomy.loadFile")(function* (filePath: string) {
   const fs = yield* FileSystem.FileSystem;
 
   const exists = yield* fs.exists(filePath).pipe(Effect.orElseSucceed(() => false));

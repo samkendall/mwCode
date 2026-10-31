@@ -2,17 +2,9 @@ import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 
 /**
- * Fork-local migration #2. Adds a nullable `stage_manual` column to
- * projection_threads. Stored as INTEGER 0/1 (SQLite has no boolean); it records
- * whether the user pinned the thread's stage manually, which locks out the
- * per-turn auto stage re-assessment.
- *
- * Fork migrations run through a SEPARATE Migrator with its own tracking table
- * (`effect_sql_migrations_fork`), numbered from 1, so they never share
- * upstream's sequence. See Migrations.ts for why the split matters.
- *
- * Guarded with PRAGMA table_info so a re-run is a no-op (a second
- * ALTER TABLE ADD COLUMN would fail with "duplicate column").
+ * Fork migration on its own tracker; see Migrations.ts. `stage_manual` (INTEGER 0/1) records a
+ * stage the user pinned, which locks out per-turn re-assessment. The PRAGMA guard makes a
+ * re-run a no-op.
  */
 export default Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;

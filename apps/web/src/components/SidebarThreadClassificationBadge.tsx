@@ -11,16 +11,13 @@ import { StageProgress } from "./StageProgress";
 export type ClassificationDimension = "workType" | "stage";
 
 const CHIP_CLASS =
-  "inline-flex max-w-[8rem] shrink-0 cursor-pointer items-center gap-1 rounded-sm text-xs leading-tight text-secondary-label transition-colors outline-none hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring";
+  "inline-flex max-w-[8rem] shrink-0 cursor-pointer items-center gap-1 rounded-sm text-xs leading-tight text-secondary-label transition-colors outline-none hover:text-foreground focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring";
 
 /**
- * One classification control (work type or stage). Renders nothing when the
- * thread has no value for the dimension — the sidebar never shows empty
- * controls. The work-type dimension reads as a color dot + word; the stage
- * dimension reads as a progress pipeline (one dot per stage) + word. Clicking
- * opens a popover of the taxonomy options plus Clear; selecting dispatches
- * through `onSelect` (null clears). Row click/selection is guarded by stopping
- * propagation on the trigger and every option.
+ * One classification control: a color dot (work type) or pipeline (stage) with its
+ * word, or nothing when the thread has no value. Clicking opens the taxonomy options
+ * plus Clear; `onSelect` receives null to clear. The trigger and every option stop
+ * propagation to stay off the row's click and selection.
  */
 const ClassificationChip = memo(function ClassificationChip(props: {
   entries: readonly HarnessTaxonomyEntry[];
@@ -140,11 +137,9 @@ const ClassificationChip = memo(function ClassificationChip(props: {
 });
 
 /**
- * Work-type dot and stage pipeline for a sidebar thread row. Comfortable and
- * cozy rows show both dimensions; compact one-line rows show the work-type dot
- * only (the stage pipeline is dropped for horizontal room — the fuller rows are
- * where the lifecycle lives). Renders nothing when the thread carries neither
- * field.
+ * Work-type dot and stage pipeline for a thread row. One-line rows pass `compact`
+ * and show the work type only, for horizontal room. Renders nothing when the thread
+ * carries neither field.
  */
 export const SidebarThreadClassificationBadges = memo(
   function SidebarThreadClassificationBadges(props: {

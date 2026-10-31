@@ -17,15 +17,15 @@ import {
 import * as Schema from "effect/Schema";
 import { isKdeCaptureSession, type KdeCapturePaths } from "./KdeSnapShot.ts";
 import { isGnomeCaptureSession, readPortalPng, resizeLinuxCapture } from "./linuxCaptureSession.ts";
-export { readPortalPng, resizeLinuxCapture } from "./linuxCaptureSession.ts";
+export { readPortalPng } from "./linuxCaptureSession.ts";
 import { isHyprlandCaptureSession, type HyprlandCapturePaths } from "./HyprlandSnapShot.ts";
 
 const PORTAL = "org.freedesktop.portal.Desktop";
 const PORTAL_PATH = "/org/freedesktop/portal/desktop";
 const SCREENSHOT = "org.freedesktop.portal.Screenshot";
 const REQUEST = "org.freedesktop.portal.Request";
-const EXTENSION = "org.gnome.Shell.Extensions.T3SnapShot";
-const EXTENSION_PATH = "/org/gnome/Shell/Extensions/T3SnapShot";
+const EXTENSION = "org.gnome.Shell.Extensions.MwCodeSnapShot";
+const EXTENSION_PATH = "/org/gnome/Shell/Extensions/MwCodeSnapShot";
 const DBUS = "org.freedesktop.DBus";
 const DBUS_PATH = "/org/freedesktop/DBus";
 const UInt = Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 0xffff_ffff }));
@@ -98,7 +98,7 @@ function unavailable(error: unknown): boolean {
 }
 
 /** One connection per operation: portal registration and request ownership stay together. */
-export class LinuxCaptureConnection {
+class LinuxCaptureConnection {
   private readonly bus: MessageBus;
   private readonly disconnected: Promise<never>;
   private uniqueName = "";
@@ -172,7 +172,6 @@ export class LinuxCaptureConnection {
       });
       if (kde !== undefined && decodeKde(kde).Version.value >= 2) return "kde";
     }
-    // Sandboxed apps already have an identity. Host apps register before any portal calls.
     if (!process.env.FLATPAK_ID && !process.env.SNAP) {
       await this.call({
         destination: PORTAL,
@@ -297,7 +296,6 @@ export class LinuxCaptureConnection {
           }),
         );
       }
-      // Closing this dedicated connection also removes the signal match.
     }
   }
 

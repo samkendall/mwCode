@@ -5,20 +5,14 @@ import type { HarnessTaxonomyEntry } from "@t3tools/contracts";
 import { cn } from "../lib/utils";
 import { resolveStageFillIndex } from "./Sidebar.logic";
 
-// Above this many stages a per-dot pipeline stops reading as a scannable
-// column and starts to crowd the row, so we collapse to a compact "n/m"
-// counter (still tinted by the current stage) instead of shrinking dots into
-// an unreadable smear. The user's real taxonomy has 7 stages, comfortably
-// under the cap; the dot path is the common one.
+// Above this many stages a per-dot pipeline crowds the row, so it collapses to a
+// compact "n/m" counter tinted by the current stage.
 const STAGE_PIPELINE_DOT_CAP = 8;
 
 /**
- * A stage's progress through the lifecycle as a row of dots — one per stage in
- * the taxonomy's order — filled up to and including the current stage. The
- * current dot is the brightest, earlier dots share its color dimmed, and later
- * dots are hollow outlines. A thread with no (or an orphaned) stage renders an
- * all-hollow pipeline, so the column still lines up down the list. Purely
- * presentational and aria-hidden: the enclosing trigger names the stage.
+ * A stage's progress as one dot per taxonomy stage, filled through the current one.
+ * A thread with no (or an orphaned) stage is all hollow, so the column still lines
+ * up. Purely presentational: the enclosing trigger names the stage.
  */
 export const StageProgress = memo(function StageProgress(props: {
   stage: string | null | undefined;
